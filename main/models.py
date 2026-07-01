@@ -61,14 +61,39 @@ class Transaction(models.Model):
         ('doplata', _("Doplata")),
         ('to_liq_tolov', _("To'liq to'lov")),
     )
-    
+
+    SOURCE_TYPES = (
+        ('crm_existing', _("Avvaldan CRM da bo'lgan")),
+        ('website', _("Saytdan tushgan")),
+        ('phone_self', _("O'zi telefon qilgan")),
+        ('manual', _("Sotuvchi qo'lda kiritgan")),
+        ('bot', _("Bot amoCRM ga kiritgan")),
+    )
+
     operator = models.ForeignKey(Operator, on_delete=models.SET_NULL, null=True, verbose_name=_("Operator"))
     client = models.ForeignKey(Client, on_delete=models.CASCADE, verbose_name=_("Mijoz"))
     group = models.ForeignKey(Group, on_delete=models.SET_NULL, null=True, verbose_name=_("Guruh/Kurs nomi"))
     date = models.DateField(_("Sanasi"))
     amount = models.DecimalField(_("To'lov miqdori"), max_digits=12, decimal_places=2)
     payment_type = models.CharField(_("To'lov turi"), max_length=20, choices=PAYMENT_TYPES)
-    
+
+    source = models.CharField(
+        _("Sotuv manbasi"),
+        max_length=20,
+        choices=SOURCE_TYPES,
+        default='manual',
+    )
+    source_detail = models.CharField(
+        _("Manba tafsiloti"),
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text=_("Masalan, sayt nomi (saytdan tushgan bo'lsa)."),
+    )
+
+    is_refunded = models.BooleanField(_("Qaytarilgan"), default=False)
+    refunded_at = models.DateField(_("Qaytarilgan sana"), null=True, blank=True)
+
     course_price = models.DecimalField(_("Kurs narxi"), max_digits=12, decimal_places=2, editable=False, default=0)
     debt = models.DecimalField(_("Qarzi"), max_digits=12, decimal_places=2, editable=False, default=0)
 

@@ -1,8 +1,8 @@
 from django.urls import path
-from .views import kpi_calculator
+from .views import salaries
 
 app_name = 'main'
 
 urlpatterns = [
-    path('kpi-calculator/', kpi_calculator, name='kpi_calculator'),
+    path('salaries/', salaries, name='salaries'),
 ]

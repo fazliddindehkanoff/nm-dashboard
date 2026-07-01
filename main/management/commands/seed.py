@@ -43,14 +43,17 @@ class Command(BaseCommand):
         groups = [g1, g2, g3, g4]
         operators = [op1, op2]
         payment_types = ['bron', 'to_liq_tolov', 'doplata']
-        
+        sources = ['crm_existing', 'website', 'phone_self', 'manual', 'bot']
+        websites = ['norboyev.uz', 'instagram.com', 'telegram', 'facebook.com']
+
         start_date = datetime.now() - timedelta(days=150)
-        
+
         for i in range(250):
             cl = random.choice(clients)
             gr = random.choice(groups)
             op = random.choice(operators)
             ptype = random.choice(payment_types)
+            source = random.choice(sources)
             amount = random.choice([50000, 100000, 150000, 200000, 300000])
             
             # Ensure proper amount logic
@@ -69,6 +72,10 @@ class Command(BaseCommand):
                 date=t_date.date(),
                 amount=amount,
                 payment_type=ptype,
+                source=source,
+                source_detail=random.choice(websites) if source == 'website' else None,
+                # ~8% qaytarilgan to'lovlar
+                is_refunded=random.random() < 0.08,
             )
             
         self.stdout.write(self.style.SUCCESS('Muvaffaqiyatli: Dummy data yaratildi!'))

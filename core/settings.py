@@ -124,6 +124,23 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+
+# Sidebar'da "To'lovlar" va "Qaytarilgan to'lovlar" bir xil URL yo'liga ega,
+# shuning uchun active holatini query parametr bo'yicha ajratamiz.
+def _is_refunded_transactions_view(request):
+    return (
+        request.path.startswith("/admin/main/transaction/")
+        and request.GET.get("is_refunded__exact") == "1"
+    )
+
+
+def _is_payments_view(request):
+    return (
+        request.path.startswith("/admin/main/transaction/")
+        and request.GET.get("is_refunded__exact") != "1"
+    )
+
+
 UNFOLD = {
     "SITE_TITLE": "Norboyev Markazi",
     "SITE_HEADER": "Norboyev Markazi",
@@ -143,9 +160,9 @@ UNFOLD = {
                         "link": "/admin/",
                     },
                     {
-                        "title": "KPI Kalkulyator",
-                        "icon": "calculate",
-                        "link": "/kpi-calculator/",
+                        "title": "Maoshlar",
+                        "icon": "payments",
+                        "link": "/salaries/",
                     },
                 ],
             },
@@ -177,6 +194,13 @@ UNFOLD = {
                         "title": "To'lovlar",
                         "icon": "payments",
                         "link": "/admin/main/transaction/",
+                        "active": _is_payments_view,
+                    },
+                    {
+                        "title": "Qaytarilgan to'lovlar",
+                        "icon": "assignment_return",
+                        "link": "/admin/main/transaction/?is_refunded__exact=1",
+                        "active": _is_refunded_transactions_view,
                     },
                 ],
             },
