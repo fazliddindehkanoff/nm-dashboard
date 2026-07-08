@@ -34,11 +34,28 @@ class GroupAdmin(ModelAdmin):
 
 @admin.register(Client)
 class ClientAdmin(ModelAdmin):
-    list_display = ('full_name', 'phone_number', 'amocrm_badge', 'synced_at')
+    list_display = ('full_name', 'phone_number', 'operator', 'amocrm_badge', 'synced_at')
     search_fields = ('full_name', 'phone_number', 'amocrm_id')
-    list_filter = ('synced_at',)
+    list_filter = ('synced_at', 'operator')
     readonly_fields = ('amocrm_id', 'synced_at')
     actions_list = ('import_from_amocrm',)
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser and hasattr(request.user, 'operator'):
+            return qs.filter(operator=request.user.operator)
+        return qs
+
+    def get_fields(self, request, obj=None):
+        fields = super().get_fields(request, obj)
+        if not request.user.is_superuser and hasattr(request.user, 'operator'):
+            fields = [f for f in fields if f != 'operator']
+        return fields
+
+    def save_model(self, request, obj, form, change):
+        if not request.user.is_superuser and hasattr(request.user, 'operator'):
+            obj.operator = request.user.operator
+        super().save_model(request, obj, form, change)
 
     @display(description=_("amoCRM"), label={_("amoCRM"): "info", _("Qo'lda"): "warning"})
     def amocrm_badge(self, obj):
@@ -65,7 +82,8 @@ class ClientAdmin(ModelAdmin):
 def grant_operator_permissions(user):
     codenames = [
         'add_transaction', 'change_transaction', 'view_transaction',
-        'view_client', 'view_group', 'view_course', 'view_discount',
+        'view_client', 'add_client', 'change_client',
+        'view_group', 'view_course', 'view_discount',
     ]
     perms = Permission.objects.filter(codename__in=codenames)
     user.user_permissions.add(*perms)

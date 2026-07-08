@@ -42,6 +42,14 @@ class Group(models.Model):
 class Client(models.Model):
     full_name = models.CharField(_("Familiya-Ism"), max_length=255)
     phone_number = models.CharField(_("Telefon raqam"), max_length=20)
+    operator = models.ForeignKey(
+        'Operator',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name=_("Operator"),
+        help_text=_("Mijozni yaratgan operator.")
+    )
 
     # amoCRM integratsiyasi: mijozlar amoCRM dan yuklanadi.
     amocrm_id = models.BigIntegerField(

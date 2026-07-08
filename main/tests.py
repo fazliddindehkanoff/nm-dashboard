@@ -218,3 +218,49 @@ class OperatorRedirectMiddlewareTestCase(TestCase):
         self.client.force_login(self.superuser)
         response = self.client.get('/admin/')
         self.assertEqual(response.status_code, 200)
+
+
+class ClientAdminPermissionsTestCase(TestCase):
+    def setUp(self):
+        from django.contrib.admin.sites import AdminSite
+        from main.admin import ClientAdmin
+        self.site = AdminSite()
+        self.admin_instance = ClientAdmin(Client, self.site)
+
+        # Create two operator users
+        self.op_user1 = User.objects.create_user(username='+998901111111', password='password', is_staff=True)
+        grant_operator_permissions(self.op_user1)
+        self.op1 = Operator.objects.create(user=self.op_user1, full_name='Op One', phone_number='+998901111111')
+
+        self.op_user2 = User.objects.create_user(username='+998902222222', password='password', is_staff=True)
+        grant_operator_permissions(self.op_user2)
+        self.op2 = Operator.objects.create(user=self.op_user2, full_name='Op Two', phone_number='+998902222222')
+
+        # Create clients
+        self.client1 = Client.objects.create(full_name='Client One', phone_number='+998903333333', operator=self.op1)
+        self.client2 = Client.objects.create(full_name='Client Two', phone_number='+998904444444', operator=self.op2)
+        self.client_shared = Client.objects.create(full_name='Client Shared', phone_number='+998905555555', operator=None)
+
+    def test_operator_has_add_change_client_permissions(self):
+        self.assertTrue(self.op_user1.has_perm('main.add_client'))
+        self.assertTrue(self.op_user1.has_perm('main.change_client'))
+
+    def test_operator_client_queryset_isolation(self):
+        class DummyRequest:
+            def __init__(self, user):
+                self.user = user
+
+        req_op1 = DummyRequest(self.op_user1)
+        qs_op1 = self.admin_instance.get_queryset(req_op1)
+        self.assertEqual(qs_op1.count(), 1)
+        self.assertEqual(qs_op1.first(), self.client1)
+
+    def test_operator_client_auto_assigns_operator(self):
+        class DummyRequest:
+            def __init__(self, user):
+                self.user = user
+
+        req_op1 = DummyRequest(self.op_user1)
+        new_client = Client(full_name='Client New', phone_number='+998906666666')
+        self.admin_instance.save_model(req_op1, new_client, form=None, change=False)
+        self.assertEqual(new_client.operator, self.op1)
