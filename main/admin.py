@@ -240,11 +240,8 @@ class TransactionAdmin(ModelAdmin):
         (None, {
             'fields': (
                 'operator', 'client', 'group', 'date', 'amount', 'payment_type',
-                'source', 'source_detail', 'discount', 'screenshot', 'screenshot_preview',
+                'discount', 'screenshot',
             ),
-        }),
-        (_("Hisob-kitob"), {
-            'fields': ('course_price', 'discount_total', 'debt'),
         }),
         (_("Tasdiqlash / qaytarish"), {
             'fields': ('is_confirmed', 'confirmed_at', 'confirmed_by', 'is_refunded', 'refunded_at'),

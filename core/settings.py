@@ -170,13 +170,28 @@ def _is_payments_view(request):
 
 
 UNFOLD = {
-    "SITE_TITLE": "Norboyev Markazi",
-    "SITE_HEADER": "Norboyev Markazi",
+    "SITE_TITLE": "Norbekov Markazi",
+    "SITE_HEADER": "Norbekov Markazi",
     "SITE_URL": "/",
+    "SITE_SYMBOL": "science",
     "DASHBOARD_CALLBACK": "main.views.dashboard_callback",
+    "COLORS": {
+        "primary": {
+            "50": "239 246 255",
+            "100": "219 234 254",
+            "200": "191 219 254",
+            "300": "147 197 253",
+            "400": "96 165 250",
+            "500": "59 130 246",
+            "600": "37 99 235",
+            "700": "29 78 216",
+            "800": "30 64 175",
+            "900": "30 58 138",
+        },
+    },
     "SIDEBAR": {
         "show_search": True,
-        "show_all_applications": True,
+        "show_all_applications": False,
         "navigation": [
             {
                 "title": "Asosiy",
