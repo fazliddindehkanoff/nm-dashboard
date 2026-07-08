@@ -1,0 +1,6 @@
+amocrm-api==2.6.1
+Django==4.2.30
+django-unfold==0.67.0
+pillow==11.3.0
+PyJWT==2.13.0
+requests==2.32.5

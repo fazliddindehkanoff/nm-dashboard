@@ -6,7 +6,7 @@ from django.db.models import Sum, Count
 from datetime import datetime
 
 import json
-from django.db.models.functions import TruncMonth
+from django.db.models.functions import TruncMonth, ExtractMonth
 from datetime import timedelta
 
 # Pie/doughnut chart uchun rang palitrasi
@@ -95,10 +95,10 @@ def build_statistics(transactions):
         }]
     })
 
-    # Saytdan tushgan to'lovlarni sayt nomi bo'yicha ajratish
+    # Sayt orqali kelgan (amoCRM'da bor) to'lovlarni sayt nomi bo'yicha ajratish
     website_rows = list(
         transactions
-        .filter(source='website')
+        .filter(source='amocrm_website')
         .values('source_detail')
         .annotate(cnt=Count('id'), total=Sum('amount'))
         .order_by('-cnt')
@@ -121,11 +121,30 @@ def dashboard_callback(request, context):
     month_filter = request.GET.get('month')
     operator_filter = request.GET.get('operator_id')
 
+    # Restrict view for plain operators
+    is_plain_op = not request.user.is_superuser and hasattr(request.user, 'operator')
+
     transactions = Transaction.objects.filter(is_refunded=False)
+    if is_plain_op:
+        transactions = transactions.filter(operator=request.user.operator)
+        operator_filter = str(request.user.operator.id)
+    elif operator_filter:
+        transactions = transactions.filter(operator_id=operator_filter)
+
+    # Count transactions per month respecting operator filtering
+    count_qs = Transaction.objects.filter(is_refunded=False)
+    if is_plain_op:
+        count_qs = count_qs.filter(operator=request.user.operator)
+    elif operator_filter:
+        count_qs = count_qs.filter(operator_id=operator_filter)
+
+    monthly_counts = {
+        item['month']: item['count']
+        for item in count_qs.annotate(month=ExtractMonth('date')).values('month').annotate(count=Count('id'))
+    }
+
     if month_filter:
         transactions = transactions.filter(date__month=month_filter)
-    if operator_filter:
-        transactions = transactions.filter(operator_id=operator_filter)
 
     six_months_ago = datetime.now() - timedelta(days=180)
     monthly_data = (transactions
@@ -145,16 +164,28 @@ def dashboard_callback(request, context):
         counts.append(entry['count'])
 
     context.update({
+        "is_plain_operator": is_plain_op,
         "total_income": transactions.aggregate(total=Sum('amount'))['total'] or 0,
         "total_clients": Client.objects.count(),
-        "total_groups": Group.objects.count(),
+        "total_groups": Group.objects.filter(is_active=True).count(),
         "transactions_count": transactions.count(),
+        "pending_count": transactions.filter(is_confirmed=False).count(),
+        "total_debt": transactions.aggregate(total=Sum('debt'))['total'] or 0,
         "recent_transactions": transactions.select_related('client', 'group').order_by('-date', '-id')[:6],
-        "operators": Operator.objects.all(),
+        "operators": Operator.objects.all() if not is_plain_op else Operator.objects.filter(id=request.user.operator.id),
         "months": [
-            (1, "Yanvar"), (2, "Fevral"), (3, "Mart"), (4, "Aprel"),
-            (5, "May"), (6, "Iyun"), (7, "Iyul"), (8, "Avgust"),
-            (9, "Sentabr"), (10, "Oktabr"), (11, "Noyabr"), (12, "Dekabr")
+            (1, "Yanvar", monthly_counts.get(1, 0)),
+            (2, "Fevral", monthly_counts.get(2, 0)),
+            (3, "Mart", monthly_counts.get(3, 0)),
+            (4, "Aprel", monthly_counts.get(4, 0)),
+            (5, "May", monthly_counts.get(5, 0)),
+            (6, "Iyun", monthly_counts.get(6, 0)),
+            (7, "Iyul", monthly_counts.get(7, 0)),
+            (8, "Avgust", monthly_counts.get(8, 0)),
+            (9, "Sentabr", monthly_counts.get(9, 0)),
+            (10, "Oktabr", monthly_counts.get(10, 0)),
+            (11, "Noyabr", monthly_counts.get(11, 0)),
+            (12, "Dekabr", monthly_counts.get(12, 0))
         ],
         "selected_month": int(month_filter) if month_filter else '',
         "selected_operator": int(operator_filter) if operator_filter else '',
@@ -201,19 +232,46 @@ def salaries(request):
     month_filter = request.GET.get('month')
     operator_filter = request.GET.get('operator_id')
 
-    months = [
-        (1, "Yanvar"), (2, "Fevral"), (3, "Mart"), (4, "Aprel"),
-        (5, "May"), (6, "Iyun"), (7, "Iyul"), (8, "Avgust"),
-        (9, "Sentabr"), (10, "Oktabr"), (11, "Noyabr"), (12, "Dekabr")
-    ]
-
-    # Maosh foizi har oy uchun alohida hisoblanadi, shuning uchun oy tanlanishi shart.
-    selected_month = int(month_filter) if month_filter else datetime.now().month
+    is_plain_op = not request.user.is_superuser and hasattr(request.user, 'operator')
 
     operators = Operator.objects.all()
-    filtered_operators = operators
-    if operator_filter:
-        filtered_operators = filtered_operators.filter(id=operator_filter)
+    if is_plain_op:
+        operators = operators.filter(id=request.user.operator.id)
+        filtered_operators = operators
+        operator_filter = str(request.user.operator.id)
+    else:
+        filtered_operators = operators
+        if operator_filter:
+            filtered_operators = filtered_operators.filter(id=operator_filter)
+
+    selected_month = int(month_filter) if month_filter else datetime.now().month
+
+    # Compute monthly counts for badges (respecting operator filtering)
+    count_qs = Transaction.objects.filter(is_refunded=False)
+    if is_plain_op:
+        count_qs = count_qs.filter(operator=request.user.operator)
+    elif operator_filter:
+        count_qs = count_qs.filter(operator_id=operator_filter)
+
+    monthly_counts = {
+        item['month']: item['count']
+        for item in count_qs.annotate(month=ExtractMonth('date')).values('month').annotate(count=Count('id'))
+    }
+
+    months = [
+        (1, "Yanvar", monthly_counts.get(1, 0)),
+        (2, "Fevral", monthly_counts.get(2, 0)),
+        (3, "Mart", monthly_counts.get(3, 0)),
+        (4, "Aprel", monthly_counts.get(4, 0)),
+        (5, "May", monthly_counts.get(5, 0)),
+        (6, "Iyun", monthly_counts.get(6, 0)),
+        (7, "Iyul", monthly_counts.get(7, 0)),
+        (8, "Avgust", monthly_counts.get(8, 0)),
+        (9, "Sentabr", monthly_counts.get(9, 0)),
+        (10, "Oktabr", monthly_counts.get(10, 0)),
+        (11, "Noyabr", monthly_counts.get(11, 0)),
+        (12, "Dekabr", monthly_counts.get(12, 0))
+    ]
 
     rows = []
     total_salary = 0
@@ -249,6 +307,7 @@ def salaries(request):
         'months': months,
         'selected_month': selected_month,
         'selected_operator': int(operator_filter) if operator_filter else '',
+        'is_plain_operator': is_plain_op,
         'total_salary': total_salary,
         'total_collected_all': total_collected_all,
         'total_sales_all': total_sales_all,

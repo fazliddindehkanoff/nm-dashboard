@@ -1,0 +1,18 @@
+<div class="flex flex-wrap items-center gap-2 bg-white dark:bg-base-900 p-3 mb-4 rounded-default border border-base-200 dark:border-base-800">
+    <span class="text-xs font-semibold text-base-500 uppercase tracking-wider mr-2">Oylar bo'yicha:</span>
+    
+    <a href="?{% for key, val in query_params.items %}{{ key }}={{ val }}{% if not forloop.last %}&{% endif %}{% endfor %}"
+       class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors {% if not selected_month_filter %}bg-primary-600 text-white{% else %}bg-base-100 text-base-750 hover:bg-base-200 dark:bg-base-800 dark:text-base-300 dark:hover:bg-base-700{% endif %}">
+        Barcha oylar
+    </a>
+    
+    {% for m_id, m_name, count in months_filter %}
+    <a href="?{% for key, val in query_params.items %}{{ key }}={{ val }}&{% endfor %}date__month={{ m_id }}"
+       class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors flex items-center gap-1.5 {% if selected_month_filter == m_id %}bg-primary-600 text-white{% else %}bg-base-100 text-base-750 hover:bg-base-200 dark:bg-base-800 dark:text-base-300 dark:hover:bg-base-700{% endif %}">
+        {{ m_name }}
+        <span class="px-1.5 py-0.25 rounded-full text-[10px] {% if selected_month_filter == m_id %}bg-white/20 text-white{% else %}bg-base-200 text-base-500 dark:bg-base-700 dark:text-base-400{% endif %}">
+            {{ count }}
+        </span>
+    </a>
+    {% endfor %}
+</div>

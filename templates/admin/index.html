@@ -9,89 +9,150 @@
 
 {% block content %}
 <div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-8">
-    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div class="flex flex-col gap-1">
-            <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark">
-                {% trans 'Asosiy Ko\'rsatkichlar' %}
+    <div class="flex flex-col gap-4">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div class="flex flex-col gap-1">
+                <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark">
+                    {% trans 'Asosiy Ko\'rsatkichlar' %}
+                </div>
+                <p class="leading-relaxed mb-0 text-sm">
+                    Tizimning umumiy moliyaviy va o'quv faoliyati natijalari
+                </p>
             </div>
-            <p class="leading-relaxed mb-0 text-sm">
-                Tizimning umumiy moliyaviy va o'quv faoliyati natijalari
-            </p>
+
+            {% if not is_plain_operator %}
+            <form method="get" class="flex items-center gap-3" data-turbo="false" id="filter-form">
+                {% if selected_month %}
+                <input type="hidden" name="month" value="{{ selected_month }}">
+                {% endif %}
+                <select name="operator_id" onchange="this.form.submit()" class="border border-base-200 bg-white text-base-500 rounded-default px-3 py-2 text-sm focus:border-primary-600 focus:ring focus:ring-primary-600/20 dark:bg-base-900 dark:border-base-800 dark:text-base-400">
+                    <option value="">Barcha operatorlar</option>
+                    {% for operator in operators %}
+                    <option value="{{ operator.id }}" {% if selected_operator == operator.id %}selected{% endif %}>{{ operator.full_name }}</option>
+                    {% endfor %}
+                </select>
+                {% if selected_month or selected_operator %}
+                <a href="?" class="bg-base-100 hover:bg-base-200 text-base-700 font-medium px-4 py-2 rounded-default text-sm transition-colors flex items-center justify-center dark:bg-base-800 dark:text-base-300 dark:hover:bg-base-700">
+                    Tozalash
+                </a>
+                {% endif %}
+            </form>
+            {% else %}
+                {% if selected_month %}
+                <a href="?" class="bg-base-100 hover:bg-base-200 text-base-700 font-medium px-4 py-2 rounded-default text-sm transition-colors flex items-center justify-center dark:bg-base-800 dark:text-base-300 dark:hover:bg-base-700">
+                    Tozalash
+                </a>
+                {% endif %}
+            {% endif %}
         </div>
 
-        <form method="get" class="flex flex-col sm:flex-row gap-3" data-turbo="false">
-            <select name="operator_id" class="border border-base-200 bg-white text-base-500 rounded-default px-3 py-2 text-sm focus:border-primary-600 focus:ring focus:ring-primary-600/20 dark:bg-base-900 dark:border-base-800 dark:text-base-400">
-                <option value="">Barcha operatorlar</option>
-                {% for operator in operators %}
-                <option value="{{ operator.id }}" {% if selected_operator == operator.id %}selected{% endif %}>{{ operator.full_name }}</option>
-                {% endfor %}
-            </select>
-
-            <select name="month" class="border border-base-200 bg-white text-base-500 rounded-default px-3 py-2 text-sm focus:border-primary-600 focus:ring focus:ring-primary-600/20 dark:bg-base-900 dark:border-base-800 dark:text-base-400">
-                <option value="">Barcha oylar</option>
-                {% for m_id, m_name in months %}
-                <option value="{{ m_id }}" {% if selected_month == m_id %}selected{% endif %}>{{ m_name }}</option>
-                {% endfor %}
-            </select>
-
-            <button type="submit" class="bg-primary-600 hover:bg-primary-700 text-white font-medium px-4 py-2 rounded-default text-sm transition-colors">
-                Filtrlash
-            </button>
-            {% if selected_month or selected_operator %}
-            <a href="?" class="bg-base-100 hover:bg-base-200 text-base-700 font-medium px-4 py-2 rounded-default text-sm transition-colors flex items-center justify-center dark:bg-base-800 dark:text-base-300 dark:hover:bg-base-700">
-                Tozalash
+        <!-- Month Filter Badges -->
+        <div class="flex flex-wrap items-center gap-2 bg-white dark:bg-base-900 p-3 rounded-default border border-base-200 dark:border-base-800">
+            <span class="text-xs font-semibold text-base-500 uppercase tracking-wider mr-2">Oylar:</span>
+            
+            <a href="?{% if selected_operator %}operator_id={{ selected_operator }}{% endif %}"
+               class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors {% if not selected_month %}bg-primary-600 text-white{% else %}bg-base-100 text-base-750 hover:bg-base-200 dark:bg-base-800 dark:text-base-300 dark:hover:bg-base-700{% endif %}">
+                Barcha oylar
             </a>
-            {% endif %}
-        </form>
+            
+            {% for m_id, m_name, count in months %}
+            <a href="?month={{ m_id }}{% if selected_operator %}&operator_id={{ selected_operator }}{% endif %}"
+               class="px-3 py-1.5 rounded-full text-xs font-medium transition-colors flex items-center gap-1.5 {% if selected_month == m_id %}bg-primary-600 text-white{% else %}bg-base-100 text-base-750 hover:bg-base-200 dark:bg-base-800 dark:text-base-300 dark:hover:bg-base-700{% endif %}">
+                {{ m_name }}
+                <span class="px-1.5 py-0.25 rounded-full text-[10px] {% if selected_month == m_id %}bg-white/20 text-white{% else %}bg-base-200 text-base-500 dark:bg-base-700 dark:text-base-400{% endif %}">
+                    {{ count }}
+                </span>
+            </a>
+            {% endfor %}
+        </div>
     </div>
 
     <div class="bg-base-200 dark:bg-base-800 dark:border-base-800 h-px my-6 lg:my-8 -mt-2"></div>
 
     <div class="flex flex-col gap-6">
-        <!-- KPI Cards -->
-        <div class="flex flex-col gap-6 lg:flex-row">
-            <!-- Income Card -->
-            <div class="bg-white block flex flex-col grow overflow-hidden p-6 relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/4">
-                <div class="grow relative">
+        <!-- ===== KPI Cards ===== -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- Income -->
+            <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
+                <span class="flex items-center justify-center w-12 h-12 rounded-default shrink-0" style="background: rgba(147,51,234,0.12); color:#9333ea;">
+                    <span class="material-symbols-outlined">payments</span>
+                </span>
+                <div>
                     <p class="leading-relaxed mb-0 text-sm">Jami Tushum</p>
-                    <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-1">
-                        {{ total_income|floatformat:2|default:"0" }} UZS
+                    <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-0.5">
+                        {{ total_income|floatformat:0|default:"0" }} <span class="text-sm font-normal text-base-500">UZS</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Clients Card -->
-            <div class="bg-white block flex flex-col grow overflow-hidden p-6 relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/4">
-                <div class="grow relative">
+            <!-- Debt -->
+            <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
+                <span class="flex items-center justify-center w-12 h-12 rounded-default shrink-0" style="background: rgba(234,88,12,0.12); color:#ea580c;">
+                    <span class="material-symbols-outlined">account_balance_wallet</span>
+                </span>
+                <div>
+                    <p class="leading-relaxed mb-0 text-sm">Qarzdorlik</p>
+                    <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-0.5">
+                        {{ total_debt|floatformat:0|default:"0" }} <span class="text-sm font-normal text-base-500">UZS</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pending confirmations -->
+            <a href="/admin/main/transaction/?is_confirmed__exact=0" class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 hover:border-primary-500 transition-colors group">
+                <span class="flex items-center justify-center w-12 h-12 rounded-default shrink-0" style="background: rgba(220,38,38,0.12); color:#dc2626;">
+                    <span class="material-symbols-outlined">pending_actions</span>
+                </span>
+                <div>
+                    <p class="leading-relaxed mb-0 text-sm">Tasdiqlanmagan to'lovlar</p>
+                    <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-0.5 flex items-center gap-2">
+                        {{ pending_count|default:"0" }} <span class="text-sm font-normal text-base-500">ta</span>
+                        <span class="material-symbols-outlined text-base-400 text-base group-hover:text-primary-600">arrow_forward</span>
+                    </div>
+                </div>
+            </a>
+
+            <!-- Clients -->
+            <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
+                <span class="flex items-center justify-center w-12 h-12 rounded-default shrink-0" style="background: rgba(37,99,235,0.12); color:#2563eb;">
+                    <span class="material-symbols-outlined">people</span>
+                </span>
+                <div>
                     <p class="leading-relaxed mb-0 text-sm">Mijozlar Soni</p>
-                    <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-1">
-                        {{ total_clients|default:"0" }} ta
+                    <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-0.5">
+                        {{ total_clients|default:"0" }} <span class="text-sm font-normal text-base-500">ta</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Groups Card -->
-            <div class="bg-white block flex flex-col grow overflow-hidden p-6 relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/4">
-                <div class="grow relative">
-                    <p class="leading-relaxed mb-0 text-sm">Jami Guruhlar</p>
-                    <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-1">
-                        {{ total_groups|default:"0" }} ta
+            <!-- Active groups -->
+            <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
+                <span class="flex items-center justify-center w-12 h-12 rounded-default shrink-0" style="background: rgba(22,163,74,0.12); color:#16a34a;">
+                    <span class="material-symbols-outlined">groups</span>
+                </span>
+                <div>
+                    <p class="leading-relaxed mb-0 text-sm">Faol Guruhlar</p>
+                    <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-0.5">
+                        {{ total_groups|default:"0" }} <span class="text-sm font-normal text-base-500">ta</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Transactions count Card -->
-            <div class="bg-white block flex flex-col grow overflow-hidden p-6 relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/4">
-                <div class="grow relative">
+            <!-- Transactions count -->
+            <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
+                <span class="flex items-center justify-center w-12 h-12 rounded-default shrink-0" style="background: rgba(219,39,119,0.12); color:#db2777;">
+                    <span class="material-symbols-outlined">receipt_long</span>
+                </span>
+                <div>
                     <p class="leading-relaxed mb-0 text-sm">To'lovlar Soni</p>
-                    <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-1">
-                        {{ transactions_count|default:"0" }} ta
+                    <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-0.5">
+                        {{ transactions_count|default:"0" }} <span class="text-sm font-normal text-base-500">ta</span>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- ===== Grafiklar (yuqorida) ===== -->
+        <!-- ===== Grafiklar ===== -->
         <div class="flex flex-col gap-6 lg:flex-row">
             <!-- Income Chart -->
             <div class="bg-white block flex flex-col grow overflow-hidden p-6 relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/3">
@@ -153,11 +214,12 @@
             </div>
         </div>
 
-        <!-- ===== Matnli statistika (pastda) ===== -->
+        <!-- ===== Matnli statistika ===== -->
         <div class="flex flex-col gap-6 lg:flex-row">
             <!-- Operators Rating -->
             <div class="bg-white block flex flex-col grow overflow-hidden relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/2">
-                <div class="border-b border-base-200 flex flex-row items-center py-4 px-6 dark:border-base-800">
+                <div class="border-b border-base-200 flex flex-row items-center gap-2 py-4 px-6 dark:border-base-800">
+                    <span class="material-symbols-outlined text-primary-600 text-xl">leaderboard</span>
                     <h2 class="font-semibold text-[15px] text-important">Operatorlar reytingi</h2>
                 </div>
                 <div class="grow relative overflow-x-auto">
@@ -176,7 +238,7 @@
                                 <td class="py-3 px-6 text-base-500">{{ row.rank }}</td>
                                 <td class="py-3 px-6 text-font-important-light dark:text-font-important-dark">{{ row.name }}</td>
                                 <td class="py-3 px-6 text-right">{{ row.sales_count }} ta</td>
-                                <td class="py-3 px-6 text-right font-semibold text-primary-600 dark:text-primary-500">{{ row.total|floatformat:2 }}</td>
+                                <td class="py-3 px-6 text-right font-semibold text-primary-600 dark:text-primary-500">{{ row.total|floatformat:0 }}</td>
                             </tr>
                             {% empty %}
                             <tr><td colspan="4" class="text-sm text-base-500 text-center py-6">Ma'lumot topilmadi</td></tr>
@@ -185,7 +247,7 @@
                     </table>
                     {% if website_rows %}
                     <div class="border-t border-base-200 dark:border-base-800 px-6 py-4">
-                        <p class="text-xs uppercase text-base-500 mb-3">Saytlar kesimida sotuvlar</p>
+                        <p class="text-xs uppercase text-base-500 mb-3">Saytlar kesimida sotuvlar (amoCRM'da bor)</p>
                         <div class="flex flex-col gap-2">
                             {% for row in website_rows %}
                             <div class="flex items-center gap-3 text-sm">
@@ -200,33 +262,37 @@
             </div>
 
             <!-- Recent Transactions List -->
-            <div class="bg-white block flex flex-col grow overflow-hidden p-6 relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/2">
-                <div class="border-b border-base-200 flex flex-row items-center mb-6 -mt-6 -mx-6 py-4 px-6 dark:border-base-800">
+            <div class="bg-white block flex flex-col grow overflow-hidden relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/2">
+                <div class="border-b border-base-200 flex flex-row items-center gap-2 py-4 px-6 dark:border-base-800">
+                    <span class="material-symbols-outlined text-primary-600 text-xl">history</span>
                     <h2 class="font-semibold text-[15px] text-important">So'nggi To'lovlar</h2>
                 </div>
-                <div class="grow relative">
+                <div class="grow relative p-6">
                     <div class="flex flex-col gap-5">
                         {% for t in recent_transactions %}
                         <div class="flex flex-col gap-2 relative w-full">
-                            <div class="flex flex-row relative z-20 items-center">
+                            <div class="flex flex-row relative z-20 items-center gap-2">
                                 <h3 class="text-font-important-light dark:text-font-important-dark text-sm">
                                     {{ t.client.full_name }} <span class="text-xs text-base-500 ml-1">({{ t.group.name }})</span>
                                 </h3>
                                 <strong class="bg-base-100 font-medium text-font-important-light ml-auto px-1.5 py-1 rounded-default text-xs dark:text-font-important-dark dark:bg-base-800">
-                                    {{ t.amount|floatformat:2 }} UZS
+                                    {{ t.amount|floatformat:0 }} UZS
                                 </strong>
                             </div>
                             <div class="flex flex-row relative z-20 items-center justify-between text-xs text-base-500">
                                 <span>{{ t.date|date:"d.m.Y" }}</span>
-                                <span>
-                                    {% if t.payment_type == 'to_liq_tolov' %}
-                                        To'liq to'lov
-                                    {% elif t.payment_type == 'bron' %}
-                                        Bron
+                                <div class="flex items-center gap-2">
+                                    <span>
+                                        {% if t.payment_type == 'to_liq_tolov' %}To'liq to'lov
+                                        {% elif t.payment_type == 'bron' %}Bron
+                                        {% else %}Doplata{% endif %}
+                                    </span>
+                                    {% if t.is_confirmed %}
+                                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium" style="background: rgba(22,163,74,0.12); color:#16a34a;">Tasdiqlangan</span>
                                     {% else %}
-                                        Doplata
+                                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium" style="background: rgba(202,138,4,0.14); color:#ca8a04;">Kutilmoqda</span>
                                     {% endif %}
-                                </span>
+                                </div>
                             </div>
                             <div class="bg-base-200 dark:bg-base-800 dark:border-base-800 h-px mt-1 w-full {% if forloop.last %}hidden{% endif %}"></div>
                         </div>

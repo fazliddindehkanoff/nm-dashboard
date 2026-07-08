@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -49,6 +50,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'main.middleware.OperatorRedirectMiddleware',
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -119,25 +121,49 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# Media files (yuklangan chek/skrinshotlar)
+MEDIA_URL = 'media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
-# Sidebar'da "To'lovlar" va "Qaytarilgan to'lovlar" bir xil URL yo'liga ega,
-# shuning uchun active holatini query parametr bo'yicha ajratamiz.
+# amoCRM integratsiyasi (amocrm-api kutubxonasi orqali).
+# Kalitlarni muhit o'zgaruvchilari orqali bering (masalan .env yoki eksport).
+AMOCRM = {
+    "CLIENT_ID": os.environ.get("AMOCRM_CLIENT_ID", ""),
+    "CLIENT_SECRET": os.environ.get("AMOCRM_CLIENT_SECRET", ""),
+    "SUBDOMAIN": os.environ.get("AMOCRM_SUBDOMAIN", ""),
+    "REDIRECT_URL": os.environ.get("AMOCRM_REDIRECT_URL", ""),
+    # OAuth authorization code — birinchi ulanishda kerak bo'ladi.
+    "AUTH_CODE": os.environ.get("AMOCRM_AUTH_CODE", ""),
+    # Tokenlar shu faylda saqlanadi.
+    "TOKENS_PATH": str(BASE_DIR / ".amocrm_tokens.json"),
+}
+
+
+# Sidebar'da "To'lovlar", "Tasdiqlanmagan to'lovlar" va "Qaytarilgan to'lovlar"
+# bir xil URL yo'liga ega, shuning uchun active holatini query parametr bo'yicha ajratamiz.
+def _in_transaction_changelist(request):
+    return request.path.startswith("/admin/main/transaction/") and "add" not in request.path
+
+
 def _is_refunded_transactions_view(request):
-    return (
-        request.path.startswith("/admin/main/transaction/")
-        and request.GET.get("is_refunded__exact") == "1"
-    )
+    return _in_transaction_changelist(request) and request.GET.get("is_refunded__exact") == "1"
+
+
+def _is_unconfirmed_transactions_view(request):
+    return _in_transaction_changelist(request) and request.GET.get("is_confirmed__exact") == "0"
 
 
 def _is_payments_view(request):
     return (
-        request.path.startswith("/admin/main/transaction/")
+        _in_transaction_changelist(request)
         and request.GET.get("is_refunded__exact") != "1"
+        and request.GET.get("is_confirmed__exact") != "0"
     )
 
 
@@ -158,6 +184,7 @@ UNFOLD = {
                         "title": "Bosh sahifa",
                         "icon": "dashboard",
                         "link": "/admin/",
+                        "permission": "main.permissions.is_not_plain_operator",
                     },
                     {
                         "title": "Maoshlar",
@@ -189,12 +216,30 @@ UNFOLD = {
                         "title": "Operatorlar",
                         "icon": "support_agent",
                         "link": "/admin/main/operator/",
+                        "permission": "main.permissions.is_not_plain_operator",
                     },
+                    {
+                        "title": "Chegirmalar",
+                        "icon": "sell",
+                        "link": "/admin/main/discount/",
+                    },
+                ],
+            },
+            {
+                "title": "To'lovlar",
+                "separator": True,
+                "items": [
                     {
                         "title": "To'lovlar",
                         "icon": "payments",
                         "link": "/admin/main/transaction/",
                         "active": _is_payments_view,
+                    },
+                    {
+                        "title": "Tasdiqlanmagan to'lovlar",
+                        "icon": "pending_actions",
+                        "link": "/admin/main/transaction/?is_confirmed__exact=0",
+                        "active": _is_unconfirmed_transactions_view,
                     },
                     {
                         "title": "Qaytarilgan to'lovlar",
