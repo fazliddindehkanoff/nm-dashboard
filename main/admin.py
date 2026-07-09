@@ -1,5 +1,6 @@
 import re
 from django import forms
+from django.db import models
 from django.contrib import admin, messages
 from django.contrib.auth.models import User, Permission
 from django.shortcuts import redirect
@@ -9,7 +10,7 @@ from django.utils.translation import gettext_lazy as _
 from unfold.admin import ModelAdmin
 from unfold.decorators import action, display
 from unfold.enums import ActionVariant
-from unfold.widgets import UnfoldAdminTextInputWidget, UnfoldAdminPasswordInput
+from unfold.widgets import UnfoldAdminTextInputWidget, UnfoldAdminPasswordInput, UnfoldAdminCheckboxSelectMultiple
 
 from .models import Course, Group, Client, Operator, Discount, Transaction, Teacher
 from .services.amocrm import sync_contacts, AmoCRMNotConfigured
@@ -32,7 +33,9 @@ class GroupAdmin(ModelAdmin):
     list_display = ('__str__', 'course', 'get_teachers', 'start_date', 'price', 'active_badge')
     search_fields = ('course__name', 'teachers__full_name')
     list_filter = ('is_active', 'course', 'start_date')
-    filter_horizontal = ('teachers',)
+    formfield_overrides = {
+        models.ManyToManyField: {'widget': UnfoldAdminCheckboxSelectMultiple},
+    }
 
     @display(description=_("O'qituvchilar"))
     def get_teachers(self, obj):
