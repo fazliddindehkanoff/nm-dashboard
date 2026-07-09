@@ -15,9 +15,20 @@ class Course(models.Model):
     def __str__(self):
         return self.name
 
+class Teacher(models.Model):
+    full_name = models.CharField(_("Ism-familiya"), max_length=255)
+
+    class Meta:
+        verbose_name = _("O'qituvchi")
+        verbose_name_plural = _("O'qituvchilar")
+
+    def __str__(self):
+        return self.full_name
+
 class Group(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, verbose_name=_("Kurs"))
-    name = models.CharField(_("Nomi"), max_length=255)
+    teachers = models.ManyToManyField(Teacher, verbose_name=_("O'qituvchilar"), blank=True)
+    start_date = models.DateField(_("Boshlanish sanasi"), null=True)
     price = models.DecimalField(
         _("Guruh narxi"),
         max_digits=12,
@@ -37,7 +48,15 @@ class Group(models.Model):
         verbose_name_plural = _("Guruhlar")
 
     def __str__(self):
-        return f"{self.course.name} - {self.name}"
+        teachers_list = ", ".join([t.full_name for t in self.teachers.all()]) if self.pk else ""
+        t_str = f" ({teachers_list})" if teachers_list else ""
+        date_str = self.start_date.strftime("%d.%m.%Y") if self.start_date else ""
+        return f"{self.course.name}{t_str} - {date_str}"
+
+    def save(self, *args, **kwargs):
+        if not self.price and self.course:
+            self.price = self.course.price
+        super().save(*args, **kwargs)
 
 class Client(models.Model):
     full_name = models.CharField(_("Familiya-Ism"), max_length=255)

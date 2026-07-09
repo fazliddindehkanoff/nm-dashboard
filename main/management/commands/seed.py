@@ -41,11 +41,29 @@ class Command(BaseCommand):
         c2, _ = Course.objects.get_or_create(name='Matematika', price=350000)
         c3, _ = Course.objects.get_or_create(name='Mental Arifmetika', price=250000)
 
+        # Create Teachers
+        from main.models import Teacher
+        from datetime import date
+        
+        teacher_names = [
+            "Mirzakarim Norbekov", "Shohruh Norbekov", "Zokirjon Tojiboyev",
+            "Shuhrat Suyundiqon", "Axadjon Qo'shoqov", "Nurjahon Mahammadiyorova",
+            "Durbek Mirzayorov", "Bobur Fatullayev", "Sarvinoz Musayeva"
+        ]
+        teachers = []
+        for name in teacher_names:
+            t, _ = Teacher.objects.get_or_create(full_name=name)
+            teachers.append(t)
+
         # Groups (biri nofaol)
-        g1, _ = Group.objects.get_or_create(course=c1, name='Beginner A-1', defaults={'price': 300000, 'is_active': True})
-        g2, _ = Group.objects.get_or_create(course=c1, name='Beginner A-2', defaults={'is_active': True})
-        g3, _ = Group.objects.get_or_create(course=c2, name='Matematika 10-sinf', defaults={'price': 400000, 'is_active': True})
-        g4, _ = Group.objects.get_or_create(course=c3, name='Mental 1-guruh', defaults={'is_active': False})
+        g1, _ = Group.objects.get_or_create(course=c1, start_date=date.today(), defaults={'price': 300000, 'is_active': True})
+        g1.teachers.set([teachers[0], teachers[1]])
+        g2, _ = Group.objects.get_or_create(course=c1, start_date=date.today(), defaults={'is_active': True})
+        g2.teachers.add(teachers[2])
+        g3, _ = Group.objects.get_or_create(course=c2, start_date=date.today(), defaults={'price': 400000, 'is_active': True})
+        g3.teachers.add(teachers[3])
+        g4, _ = Group.objects.get_or_create(course=c3, start_date=date.today(), defaults={'is_active': False})
+        g4.teachers.add(teachers[4])
 
         # Chegirmalar (dinamik) — admin orqali tahrirlanadi
         Discount.objects.get_or_create(

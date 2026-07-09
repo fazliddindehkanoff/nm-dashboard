@@ -11,7 +11,7 @@ from unfold.decorators import action, display
 from unfold.enums import ActionVariant
 from unfold.widgets import UnfoldAdminTextInputWidget, UnfoldAdminPasswordInput
 
-from .models import Course, Group, Client, Operator, Discount, Transaction
+from .models import Course, Group, Client, Operator, Discount, Transaction, Teacher
 from .services.amocrm import sync_contacts, AmoCRMNotConfigured
 
 
@@ -21,11 +21,22 @@ class CourseAdmin(ModelAdmin):
     search_fields = ('name',)
 
 
+@admin.register(Teacher)
+class TeacherAdmin(ModelAdmin):
+    list_display = ('full_name',)
+    search_fields = ('full_name',)
+
+
 @admin.register(Group)
 class GroupAdmin(ModelAdmin):
-    list_display = ('name', 'course', 'price', 'active_badge')
-    search_fields = ('name', 'course__name')
-    list_filter = ('is_active', 'course')
+    list_display = ('__str__', 'course', 'get_teachers', 'start_date', 'price', 'active_badge')
+    search_fields = ('course__name', 'teachers__full_name')
+    list_filter = ('is_active', 'course', 'start_date')
+    filter_horizontal = ('teachers',)
+
+    @display(description=_("O'qituvchilar"))
+    def get_teachers(self, obj):
+        return ", ".join([t.full_name for t in obj.teachers.all()])
 
     @display(description=_("Holati"), label={_("Faol"): "success", _("Nofaol"): "danger"})
     def active_badge(self, obj):
