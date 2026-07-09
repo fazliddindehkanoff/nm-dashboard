@@ -190,8 +190,16 @@ class DiscountAdmin(ModelAdmin):
 
 
 class TransactionForm(forms.ModelForm):
-    client_name = forms.CharField(label=_("Mijoz ismi"), max_length=255)
-    client_phone = forms.CharField(label=_("Telefon raqami"), max_length=20)
+    client_name = forms.CharField(
+        label=_("Mijoz ismi"),
+        max_length=255,
+        widget=UnfoldAdminTextInputWidget()
+    )
+    client_phone = forms.CharField(
+        label=_("Telefon raqami"),
+        max_length=20,
+        widget=UnfoldAdminTextInputWidget()
+    )
 
     class Meta:
         model = Transaction
