@@ -189,8 +189,25 @@ class DiscountAdmin(ModelAdmin):
         return _("Faol") if obj.is_active else _("Nofaol")
 
 
+class TransactionForm(forms.ModelForm):
+    client_name = forms.CharField(label=_("Mijoz ismi"), max_length=255)
+    client_phone = forms.CharField(label=_("Telefon raqami"), max_length=20)
+
+    class Meta:
+        model = Transaction
+        fields = '__all__'
+        exclude = ('client',)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk and getattr(self.instance, 'client', None):
+            self.fields['client_name'].initial = self.instance.client.full_name
+            self.fields['client_phone'].initial = self.instance.client.phone_number
+
+
 @admin.register(Transaction)
 class TransactionAdmin(ModelAdmin):
+    form = TransactionForm
     list_display = (
         'client', 'operator', 'group', 'amount', 'payment_type',
         'discount_total', 'source', 'confirmed_badge', 'refunded_badge', 'debt', 'date',
@@ -202,7 +219,6 @@ class TransactionAdmin(ModelAdmin):
         'is_confirmed', 'confirmed_at', 'confirmed_by',
         'is_refunded', 'refunded_at', 'screenshot_preview',
     )
-    autocomplete_fields = ('client',)
     date_hierarchy = 'date'
     
     list_before_template = "admin/main/transaction/month_filter_badges.html"
@@ -264,7 +280,7 @@ class TransactionAdmin(ModelAdmin):
     fieldsets = (
         (None, {
             'fields': (
-                'operator', 'client', 'group', 'date', 'amount', 'payment_type',
+                'operator', 'client_name', 'client_phone', 'group', 'date', 'amount', 'payment_type',
                 'discount', 'screenshot',
             ),
         }),
@@ -303,6 +319,24 @@ class TransactionAdmin(ModelAdmin):
         # Operator to'lov kiritsa, operator avtomatik o'ziga biriktiriladi.
         if self._is_plain_operator(request):
             obj.operator = request.user.operator
+            
+        client_phone = form.cleaned_data.get('client_phone')
+        client_name = form.cleaned_data.get('client_name')
+        if client_phone and client_name:
+            client, created = Client.objects.get_or_create(
+                phone_number=client_phone,
+                defaults={'full_name': client_name}
+            )
+            if not created and client.full_name != client_name:
+                client.full_name = client_name
+                client.save(update_fields=['full_name'])
+                
+            if created and self._is_plain_operator(request):
+                client.operator = request.user.operator
+                client.save(update_fields=['operator'])
+                
+            obj.client = client
+
         super().save_model(request, obj, form, change)
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
