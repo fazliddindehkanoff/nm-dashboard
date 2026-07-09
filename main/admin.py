@@ -28,14 +28,25 @@ class TeacherAdmin(ModelAdmin):
     search_fields = ('full_name',)
 
 
+class GroupForm(forms.ModelForm):
+    class Meta:
+        model = Group
+        fields = '__all__'
+
+    def clean_teachers(self):
+        teachers = self.cleaned_data.get('teachers')
+        if teachers and teachers.count() > 2:
+            raise forms.ValidationError(_("Bir guruhga eng ko'pi bilan 2 ta o'qituvchi biriktirish mumkin."))
+        return teachers
+
+
 @admin.register(Group)
 class GroupAdmin(ModelAdmin):
+    form = GroupForm
     list_display = ('__str__', 'course', 'get_teachers', 'start_date', 'price', 'active_badge')
     search_fields = ('course__name', 'teachers__full_name')
     list_filter = ('is_active', 'course', 'start_date')
-    formfield_overrides = {
-        models.ManyToManyField: {'widget': UnfoldAdminCheckboxSelectMultiple},
-    }
+    autocomplete_fields = ('teachers',)
 
     @display(description=_("O'qituvchilar"))
     def get_teachers(self, obj):
