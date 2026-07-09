@@ -43,7 +43,7 @@ class GroupForm(forms.ModelForm):
 @admin.register(Group)
 class GroupAdmin(ModelAdmin):
     form = GroupForm
-    list_display = ('__str__', 'course', 'get_teachers', 'start_date', 'price', 'active_badge')
+    list_display = ('__str__', 'course', 'get_teachers', 'start_date', 'active_badge')
     search_fields = ('course__name', 'teachers__full_name')
     list_filter = ('is_active', 'course', 'start_date')
     autocomplete_fields = ('teachers',)

@@ -88,7 +88,7 @@ class TransactionAdminPermissionsTestCase(TestCase):
         # Create dummy Client, Course, Group
         self.client = Client.objects.create(full_name='Test Client', phone_number='+998903333333')
         self.course = Course.objects.create(name='Test Course', price=100000)
-        self.group = Group.objects.create(course=self.course, start_date=date.today(), price=100000, is_active=True)
+        self.group = Group.objects.create(course=self.course, start_date=date.today(), is_active=True)
 
         # Create unconfirmed and confirmed transactions
         self.tx_unconfirmed = Transaction.objects.create(

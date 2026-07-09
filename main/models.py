@@ -29,14 +29,6 @@ class Group(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, verbose_name=_("Kurs"))
     teachers = models.ManyToManyField(Teacher, verbose_name=_("O'qituvchilar"), blank=True)
     start_date = models.DateField(_("Boshlanish sanasi"), null=True)
-    price = models.DecimalField(
-        _("Guruh narxi"),
-        max_digits=12,
-        decimal_places=2,
-        null=True,
-        blank=True,
-        help_text=_("Agar bo'sh qolsa, kurs narxi olinadi.")
-    )
     is_active = models.BooleanField(
         _("Faol"),
         default=True,
@@ -52,11 +44,6 @@ class Group(models.Model):
         t_str = f" ({teachers_list})" if teachers_list else ""
         date_str = self.start_date.strftime("%d.%m.%Y") if self.start_date else ""
         return f"{self.course.name}{t_str} - {date_str}"
-
-    def save(self, *args, **kwargs):
-        if not self.price and self.course:
-            self.price = self.course.price
-        super().save(*args, **kwargs)
 
 class Client(models.Model):
     full_name = models.CharField(_("Familiya-Ism"), max_length=255)
@@ -208,7 +195,7 @@ class Transaction(models.Model):
             return Decimal(str(value or 0))
 
         if self.group:
-            self.course_price = self.group.price if self.group.price is not None else self.group.course.price
+            self.course_price = self.group.course.price
         else:
             self.course_price = 0
         course_price = _dec(self.course_price)
