@@ -61,6 +61,9 @@ Public interface:
 - `find_lead_by_phone(phone) -> LeadMatch | None`
   - Normalizes the phone (strip everything except digits; compare by the last 9
     digits so `+998 90 123-45-67`, `901234567`, and `998901234567` all match).
+    If the normalized phone has fewer than 9 digits, the lookup is skipped and
+    `None` is returned (`phone_number` is free-text, so garbage input must not
+    produce fuzzy matches).
   - Calls `GET /api/v4/contacts?query=<digits>&with=leads`, then verifies the
     returned contacts actually contain the normalized phone in their phone custom
     field (amoCRM's `query` is fuzzy).
@@ -95,13 +98,24 @@ The admin badge logic becomes: badge shows "amoCRM" if `amocrm_id` **or**
 
 A helper `link_client_to_amocrm(client) -> LeadMatch | None` in the service module:
 runs `find_lead_by_phone(client.phone_number)`; on a match, saves
-`amocrm_id`, `amocrm_lead_id`, `synced_at` on the client.
+`amocrm_id`, `amocrm_lead_id`, `synced_at` on the client, with two guards:
+
+- **Never overwrite an existing `amocrm_id`.** If the client already has a contact
+  ID (e.g. from the bulk import) and the lookup returns a different one, keep the
+  original and only set `amocrm_lead_id` / `synced_at`.
+- **Unique-constraint conflict:** `Client.amocrm_id` is `unique=True`. If the
+  matched contact ID is already stored on *another* client row (two local clients
+  can share a phone), skip writing `amocrm_id` (set only `amocrm_lead_id` /
+  `synced_at`) and include this in the warning message. The save must never raise
+  `IntegrityError` — check with a query first.
 
 Called from:
 
 - `ClientAdmin.save_model` — only on creation (`change=False`). Messages:
   match → success "Mijoz amoCRM'da topildi"; no match → info; API error /
   unconfigured → warning. Save always succeeds.
+  (No-match is *info* here but *warning* in the transaction flow — deliberate: a
+  client not in amoCRM is routine, but a payment for such a client is noteworthy.)
 - `TransactionAdmin.save_model` — when it `get_or_create`s a **new** client (see
   next section, one lookup shared by both concerns).
 
@@ -128,6 +142,8 @@ Edits to existing transactions (`change=True`) do not touch amoCRM.
 ### 5. Housekeeping
 
 - Recreate the virtualenv (`python3 -m venv env && env/bin/pip install -r requirements.txt`).
+  This is local environment repair, not part of the feature — it must not gate any
+  implementation task other than being able to run tests locally.
 - `requirements.txt`: remove `amocrm-api`, keep `requests` (already present).
 - Update `core/settings.py` AMOCRM block to the two new variables.
 - The `sync_amocrm_clients` management command keeps working unchanged (it calls
@@ -138,8 +154,11 @@ Edits to existing transactions (`change=True`) do not touch amoCRM.
 | Situation | Behavior |
 |---|---|
 | `AMOCRM_*` env vars missing | Local save proceeds; warning "amoCRM sozlanmagan" |
+| HTTP 401 (token revoked/expired) | Local save proceeds; specific warning "amoCRM token yaroqsiz — yangi token kiriting" so the admin can tell "token dead" from "amoCRM down" |
 | amoCRM unreachable / 5xx / timeout | Local save proceeds; warning with error text |
 | No contact/lead matches phone | Client saves without link; transaction saves with `source=not_in_amocrm`; warning |
+| Phone has fewer than 9 digits | Lookup skipped, treated as no match |
+| Matched contact ID already on another client | Only `amocrm_lead_id`/`synced_at` written; warning mentions the conflict; no `IntegrityError` |
 | Multiple leads match | Newest active lead wins; closed leads only if no active ones |
 | Lead already closed | `close_lead` still PATCHes 142 (idempotent); message notes it was already closed if detectable |
 
@@ -150,7 +169,9 @@ Unit tests (Django `TestCase`, `unittest.mock` on the HTTP layer — no real net
 - Phone normalization: various formats map to the same search key.
 - `find_lead_by_phone`: match, no match, fuzzy-query false positive filtered out,
   multiple leads → newest active chosen, only-closed-leads case.
-- Client admin save: fields stored on match; save succeeds on API error.
+- Client admin save: fields stored on match; save succeeds on API error;
+  existing `amocrm_id` never overwritten; contact-ID conflict with another client
+  writes only `amocrm_lead_id` and does not raise.
 - Transaction admin save: `source` set correctly for match/no-match/error;
   `close_lead` called with the right ID; save succeeds when amoCRM fails.
 - `AmoCRMNotConfigured` raised when env vars are missing.
