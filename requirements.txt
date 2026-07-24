@@ -1,6 +1,6 @@
 Django==4.2.30
 django-unfold==0.67.0
-pillow==11.3.0
+pillow==12.3.0
 qrcode==8.2
 PyJWT==2.13.0
 requests==2.32.5
