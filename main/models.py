@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 
 from django.db import models
@@ -29,6 +30,13 @@ class Group(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, verbose_name=_("Kurs"))
     teachers = models.ManyToManyField(Teacher, verbose_name=_("O'qituvchilar"), blank=True)
     start_date = models.DateField(_("Boshlanish sanasi"), null=True)
+    telegram_chat_id = models.CharField(
+        _("Telegram guruh ID"),
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text=_("To'lov tasdiqlanganda QR kod yuboriladigan Telegram guruhning chat ID si (masalan -1001234567890)."),
+    )
     is_active = models.BooleanField(
         _("Faol"),
         default=True,
@@ -46,6 +54,13 @@ class Group(models.Model):
         return f"{self.course.name}{t_str} - {date_str}"
 
 class Client(models.Model):
+    uuid = models.UUIDField(
+        _("UUID"),
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        help_text=_("Mijozning yagona identifikatori (QR kod uchun ishlatiladi)."),
+    )
     full_name = models.CharField(_("Familiya-Ism"), max_length=255)
     phone_number = models.CharField(_("Telefon raqam"), max_length=20)
     operator = models.ForeignKey(
@@ -64,6 +79,12 @@ class Client(models.Model):
         null=True,
         blank=True,
         help_text=_("amoCRM dagi kontakt ID raqami."),
+    )
+    amocrm_lead_id = models.BigIntegerField(
+        _("amoCRM Lead ID"),
+        null=True,
+        blank=True,
+        help_text=_("Mijozga mos keluvchi amoCRM lead (bitim) ID raqami."),
     )
     synced_at = models.DateTimeField(_("amoCRM sinxron sanasi"), null=True, blank=True)
 
@@ -117,6 +138,7 @@ class Transaction(models.Model):
         ('bron', _("Bron")),
         ('doplata', _("Doplata")),
         ('to_liq_tolov', _("To'liq to'lov")),
+        ('naqd', _("Naqd pul")),
     )
 
     # Sotuv manbasi ikkiga bo'linadi: amoCRM da bor / amoCRM da yo'q.

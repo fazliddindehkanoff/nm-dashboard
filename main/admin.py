@@ -4,6 +4,8 @@ from django.db import models
 from django.contrib import admin, messages
 from django.contrib.auth.models import User, Permission
 from django.shortcuts import redirect
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
@@ -13,7 +15,15 @@ from unfold.enums import ActionVariant
 from unfold.widgets import UnfoldAdminTextInputWidget, UnfoldAdminPasswordInput, UnfoldAdminCheckboxSelectMultiple
 
 from .models import Course, Group, Client, Operator, Discount, Transaction, Teacher
-from .services.amocrm import sync_contacts, AmoCRMNotConfigured
+from .services.amocrm import (
+    sync_contacts,
+    link_client_to_amocrm,
+    close_lead,
+    LeadMatch,
+    AmoCRMNotConfigured,
+    AmoCRMError,
+)
+from .services.telegram import send_payment_qr, TelegramNotConfigured
 
 
 @admin.register(Course)
@@ -43,10 +53,59 @@ class GroupForm(forms.ModelForm):
 @admin.register(Group)
 class GroupAdmin(ModelAdmin):
     form = GroupForm
-    list_display = ('__str__', 'course', 'get_teachers', 'start_date', 'active_badge')
+    list_display = ('group_link', 'course', 'get_teachers', 'start_date', 'active_badge')
+    list_display_links = None
     search_fields = ('course__name', 'teachers__full_name')
     list_filter = ('is_active', 'course', 'start_date')
     autocomplete_fields = ('teachers',)
+
+    # ---- Guruh ustiga bosilganda o'zgartirish emas, detail sahifa ochiladi ----
+    def get_urls(self):
+        urls = super().get_urls()
+        info = self.model._meta.app_label, self.model._meta.model_name
+        custom = [
+            path(
+                "<path:object_id>/detail/",
+                self.admin_site.admin_view(self.group_detail_view),
+                name="%s_%s_detail" % info,
+            ),
+        ]
+        return custom + urls
+
+    @display(description=_("Guruh"))
+    def group_link(self, obj):
+        url = reverse("admin:main_group_detail", args=[obj.pk])
+        return format_html(
+            '<a href="{}" class="text-primary-600 dark:text-primary-500 font-medium">{}</a>',
+            url,
+            str(obj),
+        )
+
+    def group_detail_view(self, request, object_id):
+        group = self.get_object(request, object_id)
+        if group is None:
+            self.message_user(request, _("Guruh topilmadi."), level=messages.ERROR)
+            return redirect("admin:main_group_changelist")
+
+        transactions = (
+            Transaction.objects.filter(group=group)
+            .select_related("client", "operator")
+            .order_by("-date", "-id")
+        )
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": str(group),
+            "group": group,
+            "transactions": transactions,
+            "teachers": group.teachers.all(),
+            "change_url": reverse("admin:main_group_change", args=[group.pk]),
+            "delete_url": reverse("admin:main_group_delete", args=[group.pk]),
+            "changelist_url": reverse("admin:main_group_changelist"),
+            "has_change_permission": self.has_change_permission(request, group),
+            "has_delete_permission": self.has_delete_permission(request, group),
+        }
+        return TemplateResponse(request, "admin/main/group/detail.html", context)
 
     @display(description=_("O'qituvchilar"))
     def get_teachers(self, obj):
@@ -81,10 +140,35 @@ class ClientAdmin(ModelAdmin):
         if not request.user.is_superuser and hasattr(request.user, 'operator'):
             obj.operator = request.user.operator
         super().save_model(request, obj, form, change)
+        # Faqat yangi mijoz yaratilganda amoCRM'dan lead qidiramiz.
+        if not change:
+            self._amocrm_link(request, obj)
+
+    def _amocrm_link(self, request, client):
+        """Mijozni amoCRM lead bilan bog'laydi. Xatolar saqlashni bloklamaydi."""
+        try:
+            match = link_client_to_amocrm(client)
+        except AmoCRMNotConfigured as exc:
+            self.message_user(request, str(exc), level=messages.WARNING)
+            return
+        except AmoCRMError as exc:
+            self.message_user(request, str(exc), level=messages.WARNING)
+            return
+
+        if match is None:
+            self.message_user(request, _("Mijoz amoCRM'da topilmadi."), level=messages.INFO)
+        elif match.contact_conflict:
+            self.message_user(
+                request,
+                _("amoCRM'da topildi, lekin kontakt ID boshqa mijozda — faqat lead bog'landi."),
+                level=messages.WARNING,
+            )
+        else:
+            self.message_user(request, _("Mijoz amoCRM'da topildi va bog'landi."), level=messages.SUCCESS)
 
     @display(description=_("amoCRM"), label={_("amoCRM"): "info", _("Qo'lda"): "warning"})
     def amocrm_badge(self, obj):
-        return _("amoCRM") if obj.amocrm_id else _("Qo'lda")
+        return _("amoCRM") if (obj.amocrm_id or obj.amocrm_lead_id) else _("Qo'lda")
 
     @action(description=_("amoCRM'dan yuklab olish"), url_path="import-amocrm", icon="cloud_download")
     def import_from_amocrm(self, request):
@@ -327,7 +411,7 @@ class TransactionAdmin(ModelAdmin):
         # Operator to'lov kiritsa, operator avtomatik o'ziga biriktiriladi.
         if self._is_plain_operator(request):
             obj.operator = request.user.operator
-            
+
         client_phone = form.cleaned_data.get('client_phone')
         client_name = form.cleaned_data.get('client_name')
         if client_phone and client_name:
@@ -338,14 +422,79 @@ class TransactionAdmin(ModelAdmin):
             if not created and client.full_name != client_name:
                 client.full_name = client_name
                 client.save(update_fields=['full_name'])
-                
+
             if created and self._is_plain_operator(request):
                 client.operator = request.user.operator
                 client.save(update_fields=['operator'])
-                
+
             obj.client = client
 
+        # Yangi to'lov uchun amoCRM lead'ni aniqlab, manbani belgilaymiz.
+        lead_match = None
+        if not change:
+            lead_match = self._amocrm_set_source(request, obj)
+
         super().save_model(request, obj, form, change)
+
+        # To'lov saqlangach lead'ni "Muvaffaqiyatli yakunlandi" ga o'tkazamiz.
+        if not change and lead_match and lead_match.lead_id:
+            self._amocrm_close_lead(request, lead_match.lead_id)
+
+    def _amocrm_set_source(self, request, obj):
+        """Yangi to'lov uchun `source` ni amoCRM natijasidan belgilaydi.
+
+        Mos lead topilsa `LeadMatch` qaytaradi, aks holda None. amoCRM
+        muammolari saqlashni bloklamaydi — faqat ogohlantirish ko'rsatiladi.
+        """
+        client = getattr(obj, 'client', None)
+        if client is None:
+            obj.source = 'not_in_amocrm'
+            return None
+
+        try:
+            # Mijoz oldin bog'langan bo'lsa, qayta qidirmaymiz.
+            if client.amocrm_lead_id:
+                obj.source = 'amocrm_other'
+                return LeadMatch(client.amocrm_id, client.amocrm_lead_id, True)
+            match = link_client_to_amocrm(client)
+        except AmoCRMNotConfigured as exc:
+            obj.source = 'not_in_amocrm'
+            self.message_user(request, str(exc), level=messages.WARNING)
+            return None
+        except AmoCRMError as exc:
+            obj.source = 'not_in_amocrm'
+            self.message_user(request, str(exc), level=messages.WARNING)
+            return None
+
+        if match and match.lead_id:
+            obj.source = 'amocrm_other'
+            if match.contact_conflict:
+                self.message_user(
+                    request,
+                    _("amoCRM kontakt ID boshqa mijozda mavjud — faqat lead bog'landi."),
+                    level=messages.WARNING,
+                )
+            return match
+
+        obj.source = 'not_in_amocrm'
+        self.message_user(
+            request,
+            _("amoCRM'da lead topilmadi — manba \"amoCRM'da yo'q\" deb belgilandi."),
+            level=messages.WARNING,
+        )
+        return None
+
+    def _amocrm_close_lead(self, request, lead_id):
+        try:
+            close_lead(lead_id)
+        except (AmoCRMNotConfigured, AmoCRMError) as exc:
+            self.message_user(request, _("amoCRM lead yopilmadi: %s") % exc, level=messages.WARNING)
+            return
+        self.message_user(
+            request,
+            _("amoCRM lead 'Muvaffaqiyatli yakunlandi' bosqichiga o'tkazildi."),
+            level=messages.SUCCESS,
+        )
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         # Yangi to'lovlarda faqat faol guruhlar ko'rsatiladi.
@@ -400,6 +549,37 @@ class TransactionAdmin(ModelAdmin):
         obj.confirmed_by = request.user
         obj.save(update_fields=['is_confirmed', 'confirmed_at', 'confirmed_by'])
         self.message_user(request, _("To'lov tasdiqlandi."), level=messages.SUCCESS)
+        self._notify_telegram(request, obj)
+
+    def _notify_telegram(self, request, transaction):
+        """To'lov tasdiqlangach guruh Telegram chatiga QR kod yuboradi.
+
+        Xatolik yuz bersa tasdiqlash bekor qilinmaydi — foydalanuvchiga ogohlantirish
+        xabari ko'rsatiladi.
+        """
+        try:
+            ok, detail = send_payment_qr(transaction)
+        except TelegramNotConfigured as exc:
+            self.message_user(request, str(exc), level=messages.WARNING)
+            return
+        except Exception as exc:  # tarmoq / Telegram API xatolari
+            self.message_user(
+                request,
+                _("Telegramga yuborishda xatolik: %s") % exc,
+                level=messages.WARNING,
+            )
+            return
+
+        if ok:
+            self.message_user(
+                request, _("QR kod Telegram guruhiga yuborildi."), level=messages.SUCCESS
+            )
+        else:
+            self.message_user(
+                request,
+                _("QR kod yuborilmadi: %s") % detail,
+                level=messages.WARNING,
+            )
 
     @action(description=_("Tasdiqlash"), url_path="confirm-row", permissions=["confirm"], variant=ActionVariant.SUCCESS)
     def confirm_transaction(self, request, object_id):

@@ -1,7 +1,7 @@
 # amoCRM Integration — Design
 
 **Date:** 2026-07-12
-**Status:** Draft (pending user approval)
+**Status:** Implemented (2026-07-23). Awaiting live credentials (`AMOCRM_SUBDOMAIN` + `AMOCRM_TOKEN`) for manual end-to-end verification against a real account.
 
 ## Goal
 

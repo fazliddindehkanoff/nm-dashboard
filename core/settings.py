@@ -133,17 +133,20 @@ MEDIA_ROOT = BASE_DIR / 'media'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
-# amoCRM integratsiyasi (amocrm-api kutubxonasi orqali).
+# amoCRM integratsiyasi (API v4, uzoq muddatli token).
 # Kalitlarni muhit o'zgaruvchilari orqali bering (masalan .env yoki eksport).
+#   AMOCRM_SUBDOMAIN — masalan `mycompany` (mycompany.amocrm.ru uchun)
+#   AMOCRM_TOKEN     — amoCRM → Sozlamalar → Integratsiyalar dan olingan token
 AMOCRM = {
-    "CLIENT_ID": os.environ.get("AMOCRM_CLIENT_ID", ""),
-    "CLIENT_SECRET": os.environ.get("AMOCRM_CLIENT_SECRET", ""),
     "SUBDOMAIN": os.environ.get("AMOCRM_SUBDOMAIN", ""),
-    "REDIRECT_URL": os.environ.get("AMOCRM_REDIRECT_URL", ""),
-    # OAuth authorization code — birinchi ulanishda kerak bo'ladi.
-    "AUTH_CODE": os.environ.get("AMOCRM_AUTH_CODE", ""),
-    # Tokenlar shu faylda saqlanadi.
-    "TOKENS_PATH": str(BASE_DIR / ".amocrm_tokens.json"),
+    "TOKEN": os.environ.get("AMOCRM_TOKEN", ""),
+}
+
+# Telegram bot integratsiyasi.
+# To'lov tasdiqlanganda guruhning Telegram chatiga QR kod yuboriladi.
+# BotFather bergan tokenni TELEGRAM_BOT_TOKEN muhit o'zgaruvchisiga bering.
+TELEGRAM = {
+    "BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
 }
 
 
@@ -207,6 +210,11 @@ UNFOLD = {
                         "title": "Maoshlar",
                         "icon": "payments",
                         "link": "/salaries/",
+                    },
+                    {
+                        "title": "QR tekshirish",
+                        "icon": "qr_code_scanner",
+                        "link": "/qr-verify/",
                     },
                 ],
             },

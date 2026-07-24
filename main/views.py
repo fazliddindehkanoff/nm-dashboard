@@ -1,3 +1,4 @@
+import uuid as uuid_lib
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import admin
@@ -322,3 +323,68 @@ def salaries(request):
     context.update(admin.site.each_context(request))
 
     return render(request, 'admin/salaries.html', context)
+
+
+@staff_member_required
+def qr_verify(request):
+    """QR skaner orqali mijozni tekshirish sahifasi.
+
+    QR kod mijozning UUID sini kodlaydi. Skaner (klaviatura sifatida) UUID ni
+    inputga yozadi va odatda Enter yuboradi — shunda forma avtomatik yuboriladi.
+    Server UUID bo'yicha mijozni topib, uning barcha to'lovlarini (qaysi kurs,
+    qachon, qancha) ko'rsatadi.
+    """
+    code = (request.GET.get('code') or '').strip()
+
+    client = None
+    transactions = []
+    summary = None
+    searched = bool(code)
+    invalid_code = False
+
+    if code:
+        # QR odatda faqat UUID ni saqlaydi. Ba'zi skanerlar URL yoki ortiqcha
+        # belgilar qo'shishi mumkin — oxirgi bo'lakni ajratib olamiz.
+        candidate = code.rstrip('/').split('/')[-1].strip()
+        try:
+            parsed = uuid_lib.UUID(candidate)
+        except (ValueError, AttributeError):
+            invalid_code = True
+        else:
+            client = (
+                Client.objects
+                .filter(uuid=parsed)
+                .select_related('operator')
+                .first()
+            )
+            if client:
+                transactions = list(
+                    Transaction.objects
+                    .filter(client=client)
+                    .select_related('group', 'group__course', 'operator', 'discount')
+                    .order_by('-date', '-id')
+                )
+                active = [t for t in transactions if not t.is_refunded]
+                summary = {
+                    'total_paid': sum((t.amount for t in active), 0),
+                    'total_debt': sum((t.debt for t in active), 0),
+                    'count': len(transactions),
+                    'courses': sorted({
+                        t.group.course.name
+                        for t in active
+                        if t.group and t.group.course_id
+                    }),
+                }
+
+    context = {
+        'title': "QR tekshirish",
+        'code': code,
+        'searched': searched,
+        'invalid_code': invalid_code,
+        'client': client,
+        'transactions': transactions,
+        'summary': summary,
+    }
+    context.update(admin.site.each_context(request))
+
+    return render(request, 'admin/qr_verify.html', context)

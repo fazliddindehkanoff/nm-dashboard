@@ -1,10 +1,22 @@
-from django.test import TestCase
+from unittest import mock
+
+from django.test import TestCase, RequestFactory, override_settings
 from django.contrib.auth.models import User
+from django.contrib.messages.storage.fallback import FallbackStorage
 from main.models import Operator, Transaction, Client, Course, Group
 from main.admin import OperatorForm, OperatorAdmin, TransactionAdmin, grant_operator_permissions
 from main.views import dashboard_callback
 from django.utils import timezone
 from datetime import date
+
+
+def _request_with_messages(user):
+    """messages freymvorki bilan ishlaydigan soxta so'rov (admin save_model uchun)."""
+    request = RequestFactory().get('/')
+    request.user = user
+    setattr(request, 'session', {})
+    setattr(request, '_messages', FallbackStorage(request))
+    return request
 
 class OperatorAdminTestCase(TestCase):
     def test_clean_missing_user_and_credentials(self):
@@ -256,11 +268,230 @@ class ClientAdminPermissionsTestCase(TestCase):
         self.assertEqual(qs_op1.first(), self.client1)
 
     def test_operator_client_auto_assigns_operator(self):
-        class DummyRequest:
-            def __init__(self, user):
-                self.user = user
-
-        req_op1 = DummyRequest(self.op_user1)
+        # save_model endi yangi mijozda amoCRM hook'ini chaqiradi (sozlanmagan
+        # bo'lsa ogohlantirish xabari) — shuning uchun messages qo'llab-quvvatlash kerak.
+        req_op1 = _request_with_messages(self.op_user1)
         new_client = Client(full_name='Client New', phone_number='+998906666666')
         self.admin_instance.save_model(req_op1, new_client, form=None, change=False)
         self.assertEqual(new_client.operator, self.op1)
+
+
+# ---------------------------------------------------------------------------
+# amoCRM integratsiyasi testlari (tarmoqqa chiqmaydi — HTTP qatlami mock qilinadi)
+# ---------------------------------------------------------------------------
+
+def _contact(contact_id, phone, lead_ids):
+    return {
+        "id": contact_id,
+        "custom_fields_values": [
+            {"field_code": "PHONE", "values": [{"value": phone}]}
+        ],
+        "_embedded": {"leads": [{"id": lid} for lid in lead_ids]},
+    }
+
+
+def _fake_request(contacts=None, leads=None):
+    """`_request` uchun path bo'yicha javob qaytaruvchi side_effect yasaydi."""
+    contacts_resp = {"_embedded": {"contacts": contacts}} if contacts is not None else None
+    leads_resp = {"_embedded": {"leads": leads}} if leads is not None else None
+
+    def _side(method, path, params=None, json=None):
+        if path == "/api/v4/contacts":
+            return contacts_resp
+        if path == "/api/v4/leads":
+            return leads_resp
+        if path.startswith("/api/v4/leads/"):
+            return {"id": 1, "status_id": 142}
+        return None
+
+    return _side
+
+
+class AmoCRMPhoneNormalizeTestCase(TestCase):
+    def test_various_formats_same_key(self):
+        from main.services.amocrm import _normalize_phone
+        self.assertEqual(_normalize_phone("+998 90 123-45-67"), "901234567")
+        self.assertEqual(_normalize_phone("901234567"), "901234567")
+        self.assertEqual(_normalize_phone("998901234567"), "901234567")
+
+    def test_short_phone_returns_none(self):
+        from main.services.amocrm import _normalize_phone
+        self.assertIsNone(_normalize_phone("12345"))
+        self.assertIsNone(_normalize_phone(""))
+        self.assertIsNone(_normalize_phone(None))
+
+
+class AmoCRMFindLeadTestCase(TestCase):
+    def test_active_lead_match(self):
+        from main.services import amocrm
+        side = _fake_request(
+            contacts=[_contact(11, "+998901234567", [501])],
+            leads=[{"id": 501, "status_id": 100, "created_at": 1000}],
+        )
+        with mock.patch.object(amocrm, "_request", side_effect=side):
+            match = amocrm.find_lead_by_phone("+998 90 123-45-67")
+        self.assertIsNotNone(match)
+        self.assertEqual(match.contact_id, 11)
+        self.assertEqual(match.lead_id, 501)
+        self.assertTrue(match.is_active)
+
+    def test_no_contacts_returns_none(self):
+        from main.services import amocrm
+        with mock.patch.object(amocrm, "_request", side_effect=_fake_request(contacts=None)):
+            self.assertIsNone(amocrm.find_lead_by_phone("901234567"))
+
+    def test_short_phone_skips_lookup(self):
+        from main.services import amocrm
+        with mock.patch.object(amocrm, "_request") as m:
+            self.assertIsNone(amocrm.find_lead_by_phone("123"))
+        m.assert_not_called()
+
+    def test_fuzzy_false_positive_filtered(self):
+        from main.services import amocrm
+        # amoCRM boshqa telefonli kontaktni qaytaradi — u filtrlanishi kerak.
+        side = _fake_request(
+            contacts=[_contact(11, "+998907776655", [501])],
+            leads=[{"id": 501, "status_id": 100}],
+        )
+        with mock.patch.object(amocrm, "_request", side_effect=side):
+            self.assertIsNone(amocrm.find_lead_by_phone("+998901234567"))
+
+    def test_newest_active_lead_wins(self):
+        from main.services import amocrm
+        side = _fake_request(
+            contacts=[_contact(11, "+998901234567", [501, 502, 503])],
+            leads=[
+                {"id": 501, "status_id": 142, "created_at": 3000},  # yopiq
+                {"id": 502, "status_id": 100, "created_at": 1000},  # faol, eski
+                {"id": 503, "status_id": 100, "created_at": 2000},  # faol, yangi
+            ],
+        )
+        with mock.patch.object(amocrm, "_request", side_effect=side):
+            match = amocrm.find_lead_by_phone("901234567")
+        self.assertEqual(match.lead_id, 503)
+        self.assertTrue(match.is_active)
+
+    def test_only_closed_leads(self):
+        from main.services import amocrm
+        side = _fake_request(
+            contacts=[_contact(11, "+998901234567", [501, 502])],
+            leads=[
+                {"id": 501, "status_id": 143, "created_at": 1000},
+                {"id": 502, "status_id": 142, "created_at": 2000},
+            ],
+        )
+        with mock.patch.object(amocrm, "_request", side_effect=side):
+            match = amocrm.find_lead_by_phone("901234567")
+        self.assertEqual(match.lead_id, 502)  # eng yangi yopiq
+        self.assertFalse(match.is_active)
+
+
+class AmoCRMLinkClientTestCase(TestCase):
+    def test_stores_fields_on_match(self):
+        from main.services import amocrm
+        client = Client.objects.create(full_name="A", phone_number="+998901234567")
+        match = amocrm.LeadMatch(contact_id=11, lead_id=501, is_active=True)
+        with mock.patch.object(amocrm, "find_lead_by_phone", return_value=match):
+            result = amocrm.link_client_to_amocrm(client)
+        client.refresh_from_db()
+        self.assertEqual(result.lead_id, 501)
+        self.assertEqual(client.amocrm_id, 11)
+        self.assertEqual(client.amocrm_lead_id, 501)
+        self.assertIsNotNone(client.synced_at)
+
+    def test_existing_amocrm_id_not_overwritten(self):
+        from main.services import amocrm
+        client = Client.objects.create(full_name="A", phone_number="+998901234567", amocrm_id=999)
+        match = amocrm.LeadMatch(contact_id=11, lead_id=501, is_active=True)
+        with mock.patch.object(amocrm, "find_lead_by_phone", return_value=match):
+            amocrm.link_client_to_amocrm(client)
+        client.refresh_from_db()
+        self.assertEqual(client.amocrm_id, 999)  # o'zgarmagan
+        self.assertEqual(client.amocrm_lead_id, 501)
+
+    def test_contact_id_conflict_writes_only_lead(self):
+        from main.services import amocrm
+        Client.objects.create(full_name="Other", phone_number="+998900000000", amocrm_id=11)
+        client = Client.objects.create(full_name="A", phone_number="+998901234567")
+        match = amocrm.LeadMatch(contact_id=11, lead_id=501, is_active=True)
+        with mock.patch.object(amocrm, "find_lead_by_phone", return_value=match):
+            result = amocrm.link_client_to_amocrm(client)  # IntegrityError bo'lmasligi kerak
+        client.refresh_from_db()
+        self.assertIsNone(client.amocrm_id)
+        self.assertEqual(client.amocrm_lead_id, 501)
+        self.assertTrue(result.contact_conflict)
+
+    def test_no_match_returns_none(self):
+        from main.services import amocrm
+        client = Client.objects.create(full_name="A", phone_number="+998901234567")
+        with mock.patch.object(amocrm, "find_lead_by_phone", return_value=None):
+            self.assertIsNone(amocrm.link_client_to_amocrm(client))
+        client.refresh_from_db()
+        self.assertIsNone(client.amocrm_lead_id)
+
+
+class AmoCRMCloseLeadTestCase(TestCase):
+    def test_close_lead_patches_status_142(self):
+        from main.services import amocrm
+        with mock.patch.object(amocrm, "_request", return_value=None) as m:
+            amocrm.close_lead(501)
+        m.assert_called_once()
+        args, kwargs = m.call_args
+        self.assertEqual(args[0], "PATCH")
+        self.assertEqual(args[1], "/api/v4/leads/501")
+        self.assertEqual(kwargs["json"], {"status_id": 142})
+
+
+@override_settings(AMOCRM={"SUBDOMAIN": "", "TOKEN": ""})
+class AmoCRMNotConfiguredTestCase(TestCase):
+    def test_raises_when_unconfigured(self):
+        from main.services import amocrm
+        with self.assertRaises(amocrm.AmoCRMNotConfigured):
+            amocrm._request("GET", "/api/v4/contacts")
+
+
+class TransactionAdminSourceTestCase(TestCase):
+    def setUp(self):
+        from django.contrib.admin.sites import AdminSite
+        self.admin = TransactionAdmin(Transaction, AdminSite())
+        self.super = User.objects.create_superuser(username='admin', password='x')
+        self.course = Course.objects.create(name='C', price=100000)
+        self.group = Group.objects.create(course=self.course, start_date=date.today())
+
+    def _new_tx(self, client):
+        return Transaction(operator=None, client=client, group=self.group,
+                           date=date.today(), amount=50000, payment_type='naqd')
+
+    def test_source_amocrm_when_lead_found(self):
+        from main.services import amocrm
+        client = Client.objects.create(full_name='A', phone_number='+998901234567')
+        obj = self._new_tx(client)
+        match = amocrm.LeadMatch(contact_id=11, lead_id=501, is_active=True)
+        with mock.patch('main.admin.link_client_to_amocrm', return_value=match):
+            self.admin._amocrm_set_source(_request_with_messages(self.super), obj)
+        self.assertEqual(obj.source, 'amocrm_other')
+
+    def test_source_not_in_amocrm_when_no_lead(self):
+        client = Client.objects.create(full_name='A', phone_number='+998901234567')
+        obj = self._new_tx(client)
+        with mock.patch('main.admin.link_client_to_amocrm', return_value=None):
+            self.admin._amocrm_set_source(_request_with_messages(self.super), obj)
+        self.assertEqual(obj.source, 'not_in_amocrm')
+
+    def test_source_not_in_amocrm_on_error(self):
+        from main.services.amocrm import AmoCRMError
+        client = Client.objects.create(full_name='A', phone_number='+998901234567')
+        obj = self._new_tx(client)
+        with mock.patch('main.admin.link_client_to_amocrm', side_effect=AmoCRMError("down")):
+            self.admin._amocrm_set_source(_request_with_messages(self.super), obj)
+        self.assertEqual(obj.source, 'not_in_amocrm')
+
+    def test_reuses_existing_lead_without_lookup(self):
+        client = Client.objects.create(full_name='A', phone_number='+998901234567',
+                                       amocrm_id=11, amocrm_lead_id=501)
+        obj = self._new_tx(client)
+        with mock.patch('main.admin.link_client_to_amocrm') as m:
+            match = self.admin._amocrm_set_source(_request_with_messages(self.super), obj)
+        m.assert_not_called()
+        self.assertEqual(obj.source, 'amocrm_other')
+        self.assertEqual(match.lead_id, 501)
