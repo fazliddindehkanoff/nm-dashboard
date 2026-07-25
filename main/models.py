@@ -220,8 +220,6 @@ class Transaction(models.Model):
             self.course_price = self.group.course.price
         else:
             self.course_price = 0
-        course_price = _dec(self.course_price)
-        amount = _dec(self.amount)
 
         # Chegirmani hisoblash: bron to'lovi bo'lsa bron chegirmasi avtomatik
         # qo'llanadi, ustiga qo'shimcha bitta chegirma qo'shilishi mumkin.
@@ -232,17 +230,64 @@ class Transaction(models.Model):
         additional_discount = _dec(self.discount.amount) if self.discount else Decimal(0)
         self.discount_total = booking_discount + additional_discount
 
-        # Chegirma hisobga olingan yakuniy narx
-        net_price = max(course_price - self.discount_total, Decimal(0))
-
-        if self.payment_type == 'bron':
-            self.debt = max(net_price - amount, Decimal(0))
-        else:
-            # 'to_liq_tolov' to'liq to'langan; 'doplata' uchun oldingi bron
-            # ma'lum bo'lmagani sababli qarz avtomatik hisoblanmaydi.
-            self.debt = Decimal(0)
-
         super().save(*args, **kwargs)
+
+        # Qarz mijoz+guruh bo'yicha JAMI to'lovlar asosida qayta hisoblanadi
+        # (shu jumladan hozirgina saqlangan to'lov). Shu tufayli bir guruhga
+        # ketma-ket to'lovlar (bron -> doplata) qarzni to'g'ri kamaytiradi.
+        _recalc_group_debt(self.client_id, self.group_id)
+        if self.pk:
+            fresh = (
+                Transaction.objects.filter(pk=self.pk)
+                .values_list('debt', flat=True)
+                .first()
+            )
+            if fresh is not None:
+                self.debt = fresh
 
     def __str__(self):
         return f"{self.client.full_name} - {self.amount}"
+
+
+def _recalc_group_debt(client_id, group_id):
+    """Bitta mijoz+guruh uchun qarzni barcha (qaytarilmagan) to'lovlar bo'yicha
+    qayta taqsimlaydi.
+
+    Yakuniy narx = kurs narxi - jami chegirmalar. Qolgan qarz = yakuniy narx -
+    jami to'langan summa. Qolgan qarz eng oxirgi to'lovga yoziladi, qolganlari 0
+    bo'ladi — shunda dashboarddagi Sum(debt) haqiqiy qarzni beradi. Qaytarilgan
+    to'lovlar hisobga olinmaydi va ularning qarzi 0 ga tushiriladi.
+    """
+    if not client_id or not group_id:
+        return
+
+    def _dec(value):
+        return Decimal(str(value or 0))
+
+    txns = list(
+        Transaction.objects.filter(
+            client_id=client_id, group_id=group_id, is_refunded=False
+        ).order_by('date', 'id')
+    )
+
+    # Qaytarilgan to'lovlar qarzni saqlab qolmasligi kerak.
+    Transaction.objects.filter(
+        client_id=client_id, group_id=group_id, is_refunded=True
+    ).exclude(debt=0).update(debt=0)
+
+    if not txns:
+        return
+
+    course = txns[0].group.course
+    course_price = _dec(course.price)
+    total_discount = sum((_dec(t.discount_total) for t in txns), Decimal(0))
+    total_paid = sum((_dec(t.amount) for t in txns), Decimal(0))
+
+    net_price = max(course_price - total_discount, Decimal(0))
+    remaining = max(net_price - total_paid, Decimal(0))
+
+    latest = txns[-1]
+    for t in txns:
+        new_debt = remaining if t.pk == latest.pk else Decimal(0)
+        if _dec(t.debt) != new_debt:
+            Transaction.objects.filter(pk=t.pk).update(debt=new_debt)

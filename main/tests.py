@@ -202,6 +202,68 @@ class TransactionAdminPermissionsTestCase(TestCase):
         self.assertEqual(context['operators'][0], self.operator)
 
 
+class DebtCalculationTestCase(TestCase):
+    """Qarz mijoz+guruh bo'yicha jami to'lovlar asosida hisoblanishi kerak."""
+
+    def setUp(self):
+        from main.models import Discount
+        self.course = Course.objects.create(name='Kurs', price=1000000)
+        self.group = Group.objects.create(course=self.course, start_date=date.today())
+        Discount.objects.filter(is_booking=True).update(is_active=False)
+        Discount.objects.create(name='Bron', amount=200000, is_booking=True, is_active=True)
+        self.client_obj = Client.objects.create(full_name='C', phone_number='+998900000001')
+
+    def _tx(self, amount, ptype, day):
+        return Transaction.objects.create(
+            client=self.client_obj, group=self.group,
+            date=date(2026, 1, day), amount=amount, payment_type=ptype,
+        )
+
+    def _group_debt(self):
+        return sum(
+            t.debt for t in Transaction.objects.filter(
+                client=self.client_obj, group=self.group, is_refunded=False
+            )
+        )
+
+    def test_single_bron_creates_debt(self):
+        t = self._tx(300000, 'bron', 1)  # net 800k
+        self.assertEqual(t.debt, 500000)
+
+    def test_doplata_reduces_prior_bron_debt(self):
+        self._tx(300000, 'bron', 1)
+        t2 = self._tx(400000, 'doplata', 2)
+        self.assertEqual(t2.debt, 100000)
+        self.assertEqual(self._group_debt(), 100000)
+
+    def test_debt_cleared_when_fully_paid(self):
+        self._tx(300000, 'bron', 1)
+        self._tx(400000, 'doplata', 2)
+        self._tx(100000, 'doplata', 3)
+        self.assertEqual(self._group_debt(), 0)
+
+    def test_only_latest_transaction_holds_debt(self):
+        t1 = self._tx(300000, 'bron', 1)
+        self._tx(400000, 'doplata', 2)
+        t1.refresh_from_db()
+        self.assertEqual(t1.debt, 0)  # eski to'lov qarzni saqlamaydi
+
+    def test_full_payment_no_debt(self):
+        t = self._tx(1000000, 'to_liq_tolov', 1)  # chegirmasiz to'liq
+        self.assertEqual(t.debt, 0)
+
+    def test_refund_recomputes_debt(self):
+        bron = self._tx(300000, 'bron', 1)
+        self._tx(400000, 'doplata', 2)
+        self.assertEqual(self._group_debt(), 100000)
+        bron.is_refunded = True
+        bron.save(update_fields=['is_refunded'])
+        # bron qaytarilgach bron chegirmasi ham yo'qoladi: net 1M - 400k = 600k
+        self.assertEqual(self._group_debt(), 600000)
+        bron.refresh_from_db()
+        self.assertEqual(bron.debt, 0)
+
+
 class HomepageRedirectTestCase(TestCase):
     def test_homepage_redirects_to_admin(self):
         response = self.client.get('/')
