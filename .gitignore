@@ -7,3 +7,8 @@ media/
 .amocrm_tokens.json
 env/
 .claude/
+db.sqlite3
+*.sqlite3
+.hermes/
+.hermes-*.png
+gunicorn.service

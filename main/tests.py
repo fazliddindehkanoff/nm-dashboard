@@ -41,6 +41,7 @@ def _create_transaction_with_clients(clients, **kwargs):
     if not isinstance(clients, (list, tuple)):
         clients = [clients]
     kwargs.setdefault('date', date.today())
+    kwargs.setdefault('is_confirmed', True)
     t = Transaction.objects.create(**kwargs)
     for c in clients:
         TransactionClient.objects.create(transaction=t, client=c)
@@ -233,7 +234,10 @@ class TransactionAdminPermissionsTestCase(TestCase):
 
         # Verify context is populated and restricted
         self.assertTrue(context['is_plain_operator'])
-        self.assertEqual(context['transactions_count'], 2) # only operator 1's transactions
+        # Confirmed KPI'lar faqat tasdiqlangan to'lovlardan, pending esa alohida sanaladi.
+        self.assertEqual(context['transactions_count'], 1)
+        self.assertEqual(context['pending_count'], 1)
+        self.assertEqual(context['total_income'], Decimal('100000'))
         self.assertEqual(len(context['operators']), 1)
         self.assertEqual(context['operators'][0], self.operator)
 
@@ -252,6 +256,7 @@ class DebtCalculationTestCase(TestCase):
     def _tx(self, amount, ptype, day):
         t = Transaction.objects.create(
             group=self.group, date=date(2026, 1, day), amount=amount, payment_type=ptype,
+            is_confirmed=True,
         )
         TransactionClient.objects.create(transaction=t, client=self.client_obj)
         _recalc_transaction_participants(t)
@@ -301,6 +306,22 @@ class DebtCalculationTestCase(TestCase):
         # bron qaytarilgach bron chegirmasi ham yo'qoladi: net 1M - 400k = 600k
         self.assertEqual(self._group_debt(), 600000)
         self.assertEqual(self._debt(bron), 0)
+
+    def test_unconfirmed_payment_does_not_reduce_debt_until_confirmed(self):
+        self._tx(300000, 'bron', 1)
+        pending = Transaction.objects.create(
+            group=self.group, date=date(2026, 1, 2), amount=500000,
+            payment_type='doplata', is_confirmed=False,
+        )
+        TransactionClient.objects.create(transaction=pending, client=self.client_obj)
+        _recalc_transaction_participants(pending)
+
+        self.assertEqual(self._group_debt(), 500000)
+        self.assertEqual(self._debt(pending), 0)
+
+        pending.is_confirmed = True
+        pending.save(update_fields=['is_confirmed'])
+        self.assertEqual(self._group_debt(), 0)
 
 
 class HomepageRedirectTestCase(TestCase):
@@ -865,6 +886,65 @@ class ReceivePaymentTestCase(TestCase):
         self.assertEqual(response.context_data['current_debt'], Decimal('900000'))
         self.assertEqual(response.context_data['course_price'], Decimal('1000000'))
         self.assertEqual(response.context_data['clients_count'], 1)
+        self.assertTrue(response.context_data['can_receive_payment'])
+
+    def test_receive_payment_blocks_refunded_transaction(self):
+        tx = _create_transaction_with_clients(
+            self.client_obj, group=self.group, amount=100000, payment_type='naqd',
+        )
+        tx.is_refunded = True
+        tx.save(update_fields=['is_refunded'])
+        request = _post_request_with_messages(
+            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/', {'amount': '100000'},
+        )
+        response = self.admin.receive_payment_detail(request, str(tx.pk))
+        response.render()
+        tx.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(tx.amount, Decimal('100000'))
+        self.assertFalse(response.context_data['can_receive_payment'])
+
+    def test_receive_payment_blocks_unconfirmed_transaction(self):
+        tx = _create_transaction_with_clients(
+            self.client_obj, group=self.group, amount=100000, payment_type='naqd',
+            is_confirmed=False,
+        )
+        request = _post_request_with_messages(
+            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/', {'amount': '100000'},
+        )
+        response = self.admin.receive_payment_detail(request, str(tx.pk))
+        response.render()
+        tx.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(tx.amount, Decimal('100000'))
+        self.assertFalse(response.context_data['can_receive_payment'])
+
+    def test_receive_payment_blocks_overpayment(self):
+        tx = _create_transaction_with_clients(
+            self.client_obj, group=self.group, amount=900000, payment_type='naqd',
+        )
+        request = _post_request_with_messages(
+            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/', {'amount': '100001'},
+        )
+        response = self.admin.receive_payment_detail(request, str(tx.pk))
+        response.render()
+        tx.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(tx.amount, Decimal('900000'))
+        self.assertIn('amount', response.context_data['form'].errors)
+
+    def test_receive_payment_blocks_full_paid_transaction(self):
+        tx = _create_transaction_with_clients(
+            self.client_obj, group=self.group, amount=1000000, payment_type='naqd',
+        )
+        request = _request_with_messages(
+            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/'
+        )
+        response = self.admin.receive_payment_detail(request, str(tx.pk))
+        response.render()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context_data['current_debt'], 0)
+        self.assertFalse(response.context_data['can_receive_payment'])
 
 
 class ConfirmRefundPreviewTestCase(TestCase):
@@ -881,6 +961,7 @@ class ConfirmRefundPreviewTestCase(TestCase):
     def _tx(self):
         return _create_transaction_with_clients(
             self.client_obj, group=self.group, amount=100000, payment_type='naqd',
+            is_confirmed=False,
         )
 
     def test_confirm_get_preview_does_not_mutate(self):
@@ -985,11 +1066,63 @@ class ConfirmRefundPreviewTestCase(TestCase):
         self.assertTrue(tx.is_refunded)
         self.assertEqual(tx.refunded_at, timezone.now().date())
 
+    def test_confirm_post_rejects_external_next_url(self):
+        tx = self._tx()
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{tx.pk}/confirm-detail/',
+            {'next': 'https://evil.example/phish'},
+        )
+        with mock.patch('main.admin.send_payment_qr', return_value=(True, 'ok')):
+            response = self.admin.confirm_transaction_detail(request, str(tx.pk))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], reverse('admin:main_transaction_change', args=[tx.pk]))
+
+    def test_refund_post_rejects_external_next_url(self):
+        tx = self._tx()
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{tx.pk}/refund-row/',
+            {'next': 'https://evil.example/phish'},
+        )
+        response = self.admin.refund_transaction(request, str(tx.pk))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response['Location'], reverse('admin:main_transaction_changelist'))
+
+    def test_confirm_refunded_transaction_is_blocked(self):
+        tx = self._tx()
+        tx.is_refunded = True
+        tx.save(update_fields=['is_refunded'])
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{tx.pk}/confirm-detail/',
+            {'next': reverse('admin:main_transaction_change', args=[tx.pk])},
+        )
+        with mock.patch('main.admin.send_payment_qr') as notify:
+            response = self.admin.confirm_transaction_detail(request, str(tx.pk))
+        self.assertEqual(response.status_code, 302)
+        tx.refresh_from_db()
+        self.assertFalse(tx.is_confirmed)
+        notify.assert_not_called()
+
 
 class QRVerifyViewTestCase(TestCase):
     def setUp(self):
         self.superuser = User.objects.create_superuser(username='qr-admin', password='x')
-        self.client_obj = Client.objects.create(full_name='QR Client', phone_number='+998****4444')
+        self.op_user1 = User.objects.create_user(username='+998****4441', password='x', is_staff=True)
+        self.op_user2 = User.objects.create_user(username='+998****4442', password='x', is_staff=True)
+        grant_operator_permissions(self.op_user1)
+        grant_operator_permissions(self.op_user2)
+        self.operator1 = Operator.objects.create(user=self.op_user1, full_name='QR Op1', phone_number='+998****4441')
+        self.operator2 = Operator.objects.create(user=self.op_user2, full_name='QR Op2', phone_number='+998****4442')
+        self.course = Course.objects.create(name='QR Course', price=1000000)
+        self.group = Group.objects.create(course=self.course, start_date=date.today(), is_active=True)
+        self.client_obj = Client.objects.create(
+            full_name='QR Client', phone_number='+998****4444', operator=self.operator1,
+        )
+        self.other_client = Client.objects.create(
+            full_name='Other QR Client', phone_number='+998****5555', operator=self.operator2,
+        )
 
     def test_profile_link_points_to_read_only_client_detail(self):
         self.client.force_login(self.superuser)
@@ -999,6 +1132,51 @@ class QRVerifyViewTestCase(TestCase):
         change_url = reverse('admin:main_client_change', args=[self.client_obj.pk])
         self.assertContains(response, detail_url)
         self.assertNotContains(response, f'href="{change_url}"')
+
+    def test_plain_operator_can_view_own_client(self):
+        self.client.force_login(self.op_user1)
+        response = self.client.get('/qr-verify/', {'code': str(self.client_obj.uuid)})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['client'], self.client_obj)
+        self.assertContains(response, 'QR Client')
+
+    def test_plain_operator_cannot_view_other_operator_client(self):
+        self.client.force_login(self.op_user1)
+        response = self.client.get('/qr-verify/', {'code': str(self.other_client.uuid)})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context['client'])
+        self.assertNotContains(response, 'Other QR Client')
+        self.assertContains(response, 'Mijoz topilmadi')
+
+    def test_superuser_can_view_any_operator_client(self):
+        self.client.force_login(self.superuser)
+        response = self.client.get('/qr-verify/', {'code': str(self.other_client.uuid)})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['client'], self.other_client)
+        self.assertContains(response, 'Other QR Client')
+
+    def test_summary_excludes_unconfirmed_from_total_paid(self):
+        _create_transaction_with_clients(
+            self.client_obj, group=self.group, amount=100000, payment_type='naqd',
+            is_confirmed=True,
+        )
+        _create_transaction_with_clients(
+            self.client_obj, group=self.group, amount=200000, payment_type='naqd',
+            is_confirmed=False,
+        )
+        self.client.force_login(self.superuser)
+        response = self.client.get('/qr-verify/', {'code': str(self.client_obj.uuid)})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['summary']['total_paid'], Decimal('100000.00'))
+        self.assertEqual(response.context['summary']['pending_paid'], Decimal('200000.00'))
+        self.assertEqual(response.context['summary']['pending_count'], 1)
+
+    def test_accepts_qr_verify_url_with_code_querystring(self):
+        self.client.force_login(self.superuser)
+        scanned = f'https://example.com/qr-verify/?code={self.client_obj.uuid}'
+        response = self.client.get('/qr-verify/', {'code': scanned})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['client'], self.client_obj)
 
 
 # ---------------------------------------------------------------------------

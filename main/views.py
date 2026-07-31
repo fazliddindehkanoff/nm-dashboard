@@ -1,4 +1,6 @@
 import uuid as uuid_lib
+from urllib.parse import parse_qs, urlparse
+
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import admin
@@ -12,8 +14,8 @@ from datetime import timedelta
 
 # Pie/doughnut chart uchun rang palitrasi
 CHART_COLORS = [
-    "#9333ea", "#2563eb", "#16a34a", "#ea580c", "#dc2626",
-    "#0891b2", "#ca8a04", "#db2777", "#4f46e5", "#65a30d",
+    "#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af",
+    "#030712", "#1f2937", "#525252", "#737373", "#a3a3a3",
 ]
 
 
@@ -125,30 +127,29 @@ def dashboard_callback(request, context):
     # Restrict view for plain operators
     is_plain_op = not request.user.is_superuser and hasattr(request.user, 'operator')
 
-    transactions = Transaction.objects.filter(is_refunded=False)
+    all_transactions = Transaction.objects.filter(is_refunded=False)
     if is_plain_op:
-        transactions = transactions.filter(operator=request.user.operator)
+        all_transactions = all_transactions.filter(operator=request.user.operator)
         operator_filter = str(request.user.operator.id)
     elif operator_filter:
-        transactions = transactions.filter(operator_id=operator_filter)
+        all_transactions = all_transactions.filter(operator_id=operator_filter)
 
-    # Count transactions per month respecting operator filtering
-    count_qs = Transaction.objects.filter(is_refunded=False)
-    if is_plain_op:
-        count_qs = count_qs.filter(operator=request.user.operator)
-    elif operator_filter:
-        count_qs = count_qs.filter(operator_id=operator_filter)
+    confirmed_transactions = all_transactions.filter(is_confirmed=True)
+    pending_transactions = all_transactions.filter(is_confirmed=False)
 
+    # Count confirmed transactions per month respecting operator filtering
     monthly_counts = {
         item['month']: item['count']
-        for item in count_qs.annotate(month=ExtractMonth('date')).values('month').annotate(count=Count('id'))
+        for item in confirmed_transactions
+        .annotate(month=ExtractMonth('date')).values('month').annotate(count=Count('id'))
     }
 
     if month_filter:
-        transactions = transactions.filter(date__month=month_filter)
+        confirmed_transactions = confirmed_transactions.filter(date__month=month_filter)
+        pending_transactions = pending_transactions.filter(date__month=month_filter)
 
     six_months_ago = datetime.now() - timedelta(days=180)
-    monthly_data = (transactions
+    monthly_data = (confirmed_transactions
                     .filter(date__gte=six_months_ago)
                     .annotate(month=TruncMonth('date'))
                     .values('month')
@@ -166,15 +167,15 @@ def dashboard_callback(request, context):
 
     context.update({
         "is_plain_operator": is_plain_op,
-        "total_income": transactions.aggregate(total=Sum('amount'))['total'] or 0,
+        "total_income": confirmed_transactions.aggregate(total=Sum('amount'))['total'] or 0,
         "total_clients": Client.objects.count(),
         "total_groups": Group.objects.filter(is_active=True).count(),
-        "transactions_count": transactions.count(),
-        "pending_count": transactions.filter(is_confirmed=False).count(),
-        "total_debt": TransactionClient.objects.filter(transaction__in=transactions).aggregate(
+        "transactions_count": confirmed_transactions.count(),
+        "pending_count": pending_transactions.count(),
+        "total_debt": TransactionClient.objects.filter(transaction__in=confirmed_transactions).aggregate(
             total=Sum('debt')
         )['total'] or 0,
-        "recent_transactions": transactions.prefetch_related('clients').select_related('group').order_by('-date', '-id')[:6],
+        "recent_transactions": all_transactions.prefetch_related('clients').select_related('group').order_by('-date', '-id')[:6],
         "operators": Operator.objects.all() if not is_plain_op else Operator.objects.filter(id=request.user.operator.id),
         "months": [
             (1, "Yanvar", monthly_counts.get(1, 0)),
@@ -197,8 +198,8 @@ def dashboard_callback(request, context):
             "datasets": [{
                 "label": "Tushum (UZS)",
                 "data": amounts,
-                "borderColor": "var(--color-primary-700)",
-                "backgroundColor": "rgba(147, 51, 234, 0.1)",
+                "borderColor": "#111827",
+                "backgroundColor": "rgba(17, 24, 39, 0.08)",
                 "borderWidth": 2,
                 "fill": True,
                 "tension": 0.4
@@ -209,11 +210,11 @@ def dashboard_callback(request, context):
             "datasets": [{
                 "label": "To'lovlar Soni",
                 "data": counts,
-                "backgroundColor": "var(--color-primary-600)"
+                "backgroundColor": "#111827"
             }]
         })
     })
-    context.update(build_statistics(transactions))
+    context.update(build_statistics(confirmed_transactions))
     return context
 
 def calculate_salary_percentage(total_amount):
@@ -361,21 +362,24 @@ def qr_verify(request):
     searched = bool(code)
     invalid_code = False
 
+    is_plain_op = not request.user.is_superuser and hasattr(request.user, 'operator')
+
     if code:
-        # QR odatda faqat UUID ni saqlaydi. Ba'zi skanerlar URL yoki ortiqcha
-        # belgilar qo'shishi mumkin — oxirgi bo'lakni ajratib olamiz.
-        candidate = code.rstrip('/').split('/')[-1].strip()
+        # QR odatda UUID ni saqlaydi. Link skaner qilinganda querystringdagi
+        # ?code=<uuid> ni ham tushunamiz, aks holda oxirgi path bo'lagini olamiz.
+        parsed_url = urlparse(code)
+        query_code = (parse_qs(parsed_url.query).get('code') or [None])[0]
+        candidate_source = query_code or parsed_url.path or code
+        candidate = candidate_source.rstrip('/').split('/')[-1].strip()
         try:
             parsed = uuid_lib.UUID(candidate)
         except (ValueError, AttributeError):
             invalid_code = True
         else:
-            client = (
-                Client.objects
-                .filter(uuid=parsed)
-                .select_related('operator')
-                .first()
-            )
+            client_qs = Client.objects.filter(uuid=parsed).select_related('operator')
+            if is_plain_op:
+                client_qs = client_qs.filter(operator=request.user.operator)
+            client = client_qs.first()
             if client:
                 transactions = list(
                     TransactionClient.objects
@@ -386,14 +390,23 @@ def qr_verify(request):
                     )
                     .order_by('-transaction__date', '-transaction_id')
                 )
-                active = [tc for tc in transactions if not tc.transaction.is_refunded]
+                active_confirmed = [
+                    tc for tc in transactions
+                    if tc.transaction.is_confirmed and not tc.transaction.is_refunded
+                ]
+                active_pending = [
+                    tc for tc in transactions
+                    if not tc.transaction.is_confirmed and not tc.transaction.is_refunded
+                ]
                 summary = {
-                    'total_paid': sum((tc.share_amount for tc in active), 0),
-                    'total_debt': sum((tc.debt for tc in active), 0),
+                    'total_paid': sum((tc.share_amount for tc in active_confirmed), 0),
+                    'pending_paid': sum((tc.share_amount for tc in active_pending), 0),
+                    'pending_count': len(active_pending),
+                    'total_debt': sum((tc.debt for tc in active_confirmed), 0),
                     'count': len(transactions),
                     'courses': sorted({
                         tc.transaction.group.course.name
-                        for tc in active
+                        for tc in active_confirmed
                         if tc.transaction.group and tc.transaction.group.course_id
                     }),
                 }
@@ -406,6 +419,7 @@ def qr_verify(request):
         'client': client,
         'transactions': transactions,
         'summary': summary,
+        'is_plain_operator': is_plain_op,
     }
     context.update(admin.site.each_context(request))
 

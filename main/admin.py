@@ -9,6 +9,7 @@ from django.shortcuts import redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from unfold.admin import ModelAdmin, TabularInline
@@ -109,7 +110,7 @@ class GroupAdmin(ModelAdmin):
     def group_link(self, obj):
         url = reverse("admin:main_group_detail", args=[obj.pk])
         return format_html(
-            '<a href="{}" class="text-primary-600 dark:text-primary-500 font-medium">{}</a>',
+            '<a href="{}" class="text-base-700 dark:text-base-300 font-medium hover:underline">{}</a>',
             url,
             str(obj),
         )
@@ -145,7 +146,7 @@ class GroupAdmin(ModelAdmin):
     def get_teachers(self, obj):
         return ", ".join([t.full_name for t in obj.teachers.all()])
 
-    @display(description=_("Holati"), label={_("Faol"): "success", _("Nofaol"): "danger"})
+    @display(description=_("Holati"), label={_("Faol"): "default", _("Nofaol"): "default"})
     def active_badge(self, obj):
         return _("Faol") if obj.is_active else _("Nofaol")
 
@@ -175,12 +176,18 @@ class ClientAdmin(ModelAdmin):
         return qs.annotate(
             joined_groups_count=models.Count(
                 'participations__transaction__group',
-                filter=models.Q(participations__transaction__is_refunded=False),
+                filter=models.Q(
+                    participations__transaction__is_confirmed=True,
+                    participations__transaction__is_refunded=False,
+                ),
                 distinct=True,
             ),
             loan_amount=models.Sum(
                 'participations__debt',
-                filter=models.Q(participations__transaction__is_refunded=False),
+                filter=models.Q(
+                    participations__transaction__is_confirmed=True,
+                    participations__transaction__is_refunded=False,
+                ),
             ),
         )
 
@@ -188,7 +195,7 @@ class ClientAdmin(ModelAdmin):
     def client_link(self, obj):
         url = reverse("admin:main_client_detail", args=[obj.pk])
         return format_html(
-            '<a href="{}" class="text-primary-600 dark:text-primary-500 font-medium">{}</a>',
+            '<a href="{}" class="text-base-700 dark:text-base-300 font-medium hover:underline">{}</a>',
             url,
             obj.full_name,
         )
@@ -230,15 +237,19 @@ class ClientAdmin(ModelAdmin):
             .select_related("transaction", "transaction__group", "transaction__group__course", "transaction__operator")
             .order_by("-transaction__date", "-transaction_id")
         )
+        confirmed_transactions = transactions.filter(
+            transaction__is_confirmed=True,
+            transaction__is_refunded=False,
+        )
         joined_groups_count = (
-            transactions.filter(transaction__is_refunded=False)
+            confirmed_transactions
             .values("transaction__group").distinct().count()
         )
         loan_amount = (
-            transactions.filter(transaction__is_refunded=False).aggregate(total=models.Sum("debt"))["total"] or 0
+            confirmed_transactions.aggregate(total=models.Sum("debt"))["total"] or 0
         )
         total_paid = (
-            transactions.filter(transaction__is_refunded=False).aggregate(total=models.Sum("share_amount"))["total"] or 0
+            confirmed_transactions.aggregate(total=models.Sum("share_amount"))["total"] or 0
         )
 
         context = {
@@ -317,7 +328,7 @@ class ClientAdmin(ModelAdmin):
         else:
             self.message_user(request, _("Mijoz amoCRM'da topildi va bog'landi."), level=messages.SUCCESS)
 
-    @display(description=_("amoCRM"), label={_("amoCRM"): "info", _("Qo'lda"): "warning"})
+    @display(description=_("amoCRM"), label={_("amoCRM"): "default", _("Qo'lda"): "default"})
     def amocrm_badge(self, obj):
         return _("amoCRM") if (obj.amocrm_id or obj.amocrm_lead_id) else _("Qo'lda")
 
@@ -416,11 +427,11 @@ class DiscountAdmin(ModelAdmin):
     list_filter = ('is_active', 'is_booking')
     search_fields = ('name',)
 
-    @display(description=_("Turi"), label={_("Bron (avto)"): "info", _("Qo'shimcha"): "primary"})
+    @display(description=_("Turi"), label={_("Bron (avto)"): "default", _("Qo'shimcha"): "default"})
     def kind_badge(self, obj):
         return _("Bron (avto)") if obj.is_booking else _("Qo'shimcha")
 
-    @display(description=_("Holati"), label={_("Faol"): "success", _("Nofaol"): "danger"})
+    @display(description=_("Holati"), label={_("Faol"): "default", _("Nofaol"): "default"})
     def active_badge(self, obj):
         return _("Faol") if obj.is_active else _("Nofaol")
 
@@ -689,20 +700,50 @@ class TransactionAdmin(ModelAdmin):
     def has_receive_payment_permission(self, request, obj=None):
         return request.user.is_superuser
 
+    def _current_group_debt_for_participants(self, obj, participants):
+        if not obj.group_id:
+            return Decimal(0)
+        total = Decimal(0)
+        for participant in participants:
+            total += (
+                TransactionClient.objects.filter(
+                    client_id=participant.client_id,
+                    transaction__group_id=obj.group_id,
+                    transaction__is_confirmed=True,
+                    transaction__is_refunded=False,
+                ).aggregate(total=models.Sum('debt'))['total']
+                or Decimal(0)
+            )
+        return total
+
+    def _receive_payment_block_reason(self, obj, current_debt):
+        if obj.is_refunded:
+            return _("Qaytarilgan to'lovga qo'shimcha pul qabul qilib bo'lmaydi.")
+        if not obj.is_confirmed:
+            return _("Avval to'lovni tasdiqlang, keyin qo'shimcha pul qabul qiling.")
+        if current_debt <= 0:
+            return _("Bu mijoz/guruh bo'yicha qarz yopilgan.")
+        return None
+
     def _receive_payment_summary(self, obj):
         participants = list(obj.participants.select_related('client').order_by('id'))
+        current_debt = self._current_group_debt_for_participants(obj, participants)
+        block_reason = self._receive_payment_block_reason(obj, current_debt)
         return {
             'participants': participants,
             'clients_count': len(participants),
-            'current_debt': sum((p.debt or Decimal(0) for p in participants), Decimal(0)),
+            'current_debt': current_debt,
             'course_price': obj.course_price,
             'discount_total': obj.discount_total,
+            'receive_payment_block_reason': block_reason,
+            'can_receive_payment': block_reason is None,
         }
 
-    def _render_receive_payment(self, request, obj, form):
+    def _render_receive_payment(self, request, obj, form, summary=None):
+        summary = summary or self._receive_payment_summary(obj)
         context = {
             **self.admin_site.each_context(request),
-            **self._receive_payment_summary(obj),
+            **summary,
             'title': _("Pul qabul qilish"),
             'object': obj,
             'form': form,
@@ -713,7 +754,7 @@ class TransactionAdmin(ModelAdmin):
 
     @action(
         description=_("Pul qabul qilish"), url_path="receive-payment",
-        permissions=["receive_payment"], variant=ActionVariant.INFO,
+        permissions=["receive_payment"], variant=ActionVariant.DEFAULT,
     )
     def receive_payment_detail(self, request, object_id):
         obj = self.get_object(request, object_id)
@@ -721,15 +762,29 @@ class TransactionAdmin(ModelAdmin):
             self.message_user(request, _("To'lov topilmadi."), level=messages.ERROR)
             return redirect('admin:main_transaction_changelist')
 
+        summary = self._receive_payment_summary(obj)
         if request.method != 'POST':
             form = ReceivePaymentForm()
-            return self._render_receive_payment(request, obj, form)
+            return self._render_receive_payment(request, obj, form, summary=summary)
 
         form = ReceivePaymentForm(request.POST)
         if not form.is_valid():
-            return self._render_receive_payment(request, obj, form)
+            return self._render_receive_payment(request, obj, form, summary=summary)
 
-        obj.amount = (obj.amount or Decimal(0)) + form.cleaned_data['amount']
+        if summary['receive_payment_block_reason']:
+            form.add_error(None, summary['receive_payment_block_reason'])
+            return self._render_receive_payment(request, obj, form, summary=summary)
+
+        amount = form.cleaned_data['amount']
+        if amount > summary['current_debt']:
+            form.add_error(
+                'amount',
+                _("Qo'shiladigan summa joriy qarzdan oshmasligi kerak (%(debt)s UZS).")
+                % {'debt': summary['current_debt']},
+            )
+            return self._render_receive_payment(request, obj, form, summary=summary)
+
+        obj.amount = (obj.amount or Decimal(0)) + amount
         obj.save()
         self.message_user(request, _("Pul qabul qilindi."), level=messages.SUCCESS)
         return redirect('admin:main_transaction_change', object_id)
@@ -755,11 +810,11 @@ class TransactionAdmin(ModelAdmin):
             )
         return _("Chek yuklanmagan")
 
-    @display(description=_("Tasdiq"), label={_("Tasdiqlangan"): "success", _("Kutilmoqda"): "warning"})
+    @display(description=_("Tasdiq"), label={_("Tasdiqlangan"): "default", _("Kutilmoqda"): "default"})
     def confirmed_badge(self, obj):
         return _("Tasdiqlangan") if obj.is_confirmed else _("Kutilmoqda")
 
-    @display(description=_("Qaytarilgan"), label={_("Ha"): "danger", _("Yo'q"): "success"})
+    @display(description=_("Qaytarilgan"), label={_("Ha"): "default", _("Yo'q"): "default"})
     def refunded_badge(self, obj):
         return _("Ha") if obj.is_refunded else _("Yo'q")
 
@@ -781,6 +836,9 @@ class TransactionAdmin(ModelAdmin):
         obj = self.get_object(request, object_id)
         if obj is None:
             self.message_user(request, _("To'lov topilmadi."), level=messages.ERROR)
+            return
+        if obj.is_refunded:
+            self.message_user(request, _("Qaytarilgan to'lovni tasdiqlab bo'lmaydi."), level=messages.WARNING)
             return
         if obj.is_confirmed:
             self.message_user(request, _("Bu to'lov allaqachon tasdiqlangan."), level=messages.WARNING)
@@ -822,10 +880,21 @@ class TransactionAdmin(ModelAdmin):
                 level=messages.WARNING,
             )
 
+    def _safe_redirect_url(self, request, url, fallback):
+        if url and url_has_allowed_host_and_scheme(
+            url,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            return url
+        return fallback
+
     def _confirmation_cancel_url(self, request, object_id, detail=False):
-        if detail:
-            return reverse('admin:main_transaction_change', args=[object_id])
-        return request.META.get('HTTP_REFERER') or reverse('admin:main_transaction_changelist')
+        fallback = (
+            reverse('admin:main_transaction_change', args=[object_id])
+            if detail else reverse('admin:main_transaction_changelist')
+        )
+        return self._safe_redirect_url(request, request.META.get('HTTP_REFERER'), fallback)
 
     def _render_transaction_confirmation(
         self, request, obj, template_name, title, action_label, cancel_url, warning=None
@@ -872,13 +941,13 @@ class TransactionAdmin(ModelAdmin):
                 ),
             )
         self._confirm(request, object_id)
-        return redirect(request.POST.get('next') or cancel_url)
+        return redirect(self._safe_redirect_url(request, request.POST.get('next'), cancel_url))
 
     @action(
         description=_("Tasdiqlash"),
         url_path="confirm-row",
         permissions=["confirm"],
-        variant=ActionVariant.SUCCESS,
+        variant=ActionVariant.DEFAULT,
     )
     def confirm_transaction(self, request, object_id):
         return self._confirm_response(request, object_id, detail=False)
@@ -887,7 +956,7 @@ class TransactionAdmin(ModelAdmin):
         description=_("Tasdiqlash"),
         url_path="confirm-detail",
         permissions=["confirm"],
-        variant=ActionVariant.SUCCESS,
+        variant=ActionVariant.DEFAULT,
     )
     def confirm_transaction_detail(self, request, object_id):
         return self._confirm_response(request, object_id, detail=True)
@@ -935,13 +1004,13 @@ class TransactionAdmin(ModelAdmin):
                 ),
             )
         self._refund(request, object_id)
-        return redirect(request.POST.get('next') or cancel_url)
+        return redirect(self._safe_redirect_url(request, request.POST.get('next'), cancel_url))
 
     @action(
         description=_("Qaytarish"),
         url_path="refund-row",
         permissions=["refund"],
-        variant=ActionVariant.DANGER,
+        variant=ActionVariant.DEFAULT,
     )
     def refund_transaction(self, request, object_id):
         return self._refund_response(request, object_id, detail=False)
@@ -950,7 +1019,7 @@ class TransactionAdmin(ModelAdmin):
         description=_("Qaytarish"),
         url_path="refund-detail",
         permissions=["refund"],
-        variant=ActionVariant.DANGER,
+        variant=ActionVariant.DEFAULT,
     )
     def refund_transaction_detail(self, request, object_id):
         return self._refund_response(request, object_id, detail=True)

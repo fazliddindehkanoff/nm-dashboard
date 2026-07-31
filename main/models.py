@@ -323,13 +323,19 @@ def _recalc_group_debt(client_id, group_id):
 
     rows = list(
         TransactionClient.objects.filter(
-            client_id=client_id, transaction__group_id=group_id, transaction__is_refunded=False,
+            client_id=client_id,
+            transaction__group_id=group_id,
+            transaction__is_confirmed=True,
+            transaction__is_refunded=False,
         ).select_related('transaction__group__course').order_by('transaction__date', 'transaction_id')
     )
 
-    # Qaytarilgan tranzaksiyalar qarzni saqlab qolmasligi kerak.
+    # Tasdiqlanmagan yoki qaytarilgan tranzaksiyalar qarzni saqlab qolmasligi kerak.
     TransactionClient.objects.filter(
-        client_id=client_id, transaction__group_id=group_id, transaction__is_refunded=True,
+        client_id=client_id,
+        transaction__group_id=group_id,
+    ).filter(
+        models.Q(transaction__is_confirmed=False) | models.Q(transaction__is_refunded=True)
     ).exclude(debt=0).update(debt=0)
 
     if not rows:
