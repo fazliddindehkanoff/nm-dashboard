@@ -1,12 +1,13 @@
 """Telegram bot integratsiyasi.
 
 To'lov tasdiqlanganda mijozning UUID si kodlangan QR kod rasmi yaratiladi va
-guruh uchun sozlangan Telegram chatiga yuboriladi. Rasm izohida (caption) mijoz
-ismi, to'lovni qabul qilgan xodim, to'lov turi va miqdori ko'rsatiladi.
+bitta umumiy Telegram guruh chatiga yuboriladi (barcha guruhlar uchun bir xil
+chat). Rasm izohida (caption) mijoz ismi, to'lovni qabul qilgan xodim, to'lov
+turi va miqdori ko'rsatiladi.
 
-Token `settings.TELEGRAM["BOT_TOKEN"]` orqali beriladi (BotFather). Telegramga
-so'rovlar mavjud `requests` kutubxonasi orqali Bot API HTTP endpointlariga
-yuboriladi — qo'shimcha og'ir bog'liqlik talab qilinmaydi.
+Token `settings.TELEGRAM["BOT_TOKEN"]`, chat ID esa `settings.TELEGRAM["CHAT_ID"]`
+orqali beriladi. Telegramga so'rovlar mavjud `requests` kutubxonasi orqali Bot
+API HTTP endpointlariga yuboriladi — qo'shimcha og'ir bog'liqlik talab qilinmaydi.
 """
 
 from io import BytesIO
@@ -33,6 +34,15 @@ def _get_token():
     return token
 
 
+def _get_chat_id():
+    chat_id = (getattr(settings, "TELEGRAM", {}) or {}).get("CHAT_ID")
+    if not chat_id:
+        raise TelegramNotConfigured(
+            "Telegram guruh chati sozlanmagan. TELEGRAM_CHAT_ID muhit o'zgaruvchisini bering."
+        )
+    return chat_id
+
+
 def generate_qr_png(data):
     """Berilgan matndan QR kod PNG baytlarini (BytesIO) qaytaradi."""
     qr = qrcode.QRCode(
@@ -52,8 +62,7 @@ def generate_qr_png(data):
     return buffer
 
 
-def _build_caption(transaction):
-    client = transaction.client
+def _build_caption(transaction, client):
     operator = transaction.operator
     client_name = client.full_name if client else "-"
     operator_name = operator.full_name if operator else "-"
@@ -71,28 +80,9 @@ def _build_caption(transaction):
     return "\n".join(lines)
 
 
-def send_payment_qr(transaction):
-    """To'lov uchun QR kodni guruhning Telegram chatiga yuboradi.
-
-    QR kod mijozning UUID sini kodlaydi. Guruhga `telegram_chat_id` sozlanmagan
-    bo'lsa hech narsa yuborilmaydi va (False, sabab) qaytariladi.
-
-    Returns:
-        (ok: bool, detail: str)
-    """
-    token = _get_token()
-
-    group = transaction.group
-    chat_id = getattr(group, "telegram_chat_id", None) if group else None
-    if not chat_id:
-        return False, "Guruhga Telegram chat ID sozlanmagan."
-
-    client = transaction.client
-    if client is None:
-        return False, "To'lovga mijoz biriktirilmagan."
-
+def _send_qr_to_client(token, chat_id, transaction, client):
     qr_buffer = generate_qr_png(client.uuid)
-    caption = _build_caption(transaction)
+    caption = _build_caption(transaction, client)
 
     url = API_BASE.format(token=token, method="sendPhoto")
     resp = requests.post(
@@ -108,7 +98,37 @@ def send_payment_qr(transaction):
         payload = {}
 
     if resp.status_code == 200 and payload.get("ok"):
-        return True, "Yuborildi."
+        return True, None
 
     description = payload.get("description") or f"HTTP {resp.status_code}"
-    return False, f"Telegram xatosi: {description}"
+    return False, f"{client.full_name}: {description}"
+
+
+def send_payment_qr(transaction):
+    """To'lovga biriktirilgan har bir mijoz uchun alohida QR kodni umumiy
+    Telegram guruh chatiga yuboradi.
+
+    Har bir QR kod shu mijozning UUID sini kodlaydi. Barcha mijozlar uchun
+    bitta umumiy chatga (`settings.TELEGRAM["CHAT_ID"]`) yuboriladi.
+
+    Returns:
+        (ok: bool, detail: str) — `ok` faqat barcha mijozlarga muvaffaqiyatli
+        yuborilganda True bo'ladi; `detail` muvaffaqiyatsiz bo'lganlarni
+        nomlaydi.
+    """
+    token = _get_token()
+    chat_id = _get_chat_id()
+
+    clients = list(transaction.clients.all())
+    if not clients:
+        return False, "To'lovga mijoz biriktirilmagan."
+
+    failures = []
+    for client in clients:
+        ok, failure_detail = _send_qr_to_client(token, chat_id, transaction, client)
+        if not ok:
+            failures.append(failure_detail)
+
+    if not failures:
+        return True, "Yuborildi."
+    return False, "Telegram xatosi: " + "; ".join(failures)

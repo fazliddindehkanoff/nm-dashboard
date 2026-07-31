@@ -70,12 +70,35 @@
     <div class="bg-base-200 dark:bg-base-800 dark:border-base-800 h-px my-6 lg:my-8 -mt-2"></div>
 
     <div class="flex flex-col gap-6">
+        <!-- ===== Quick Actions ===== -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            {% if perms.main.add_transaction %}
+            <a href="/admin/main/transaction/add/" class="bg-white flex items-center gap-3 overflow-hidden p-4 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 hover:border-base-400 transition-colors">
+                <span class="material-symbols-outlined text-base-500" aria-hidden="true">add_card</span>
+                <span class="font-medium text-sm text-font-important-light dark:text-font-important-dark">Yangi to'lov</span>
+            </a>
+            {% endif %}
+            <a href="/admin/main/transaction/?is_confirmed__exact=0" class="bg-white flex items-center gap-3 overflow-hidden p-4 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 hover:border-base-400 transition-colors">
+                <span class="material-symbols-outlined text-base-500" aria-hidden="true">pending_actions</span>
+                <span class="font-medium text-sm text-font-important-light dark:text-font-important-dark">Tasdiqlash navbati</span>
+                <span class="ml-auto bg-base-100 dark:bg-base-800 text-base-600 dark:text-base-300 px-2 py-0.5 rounded-full text-xs">{{ pending_count|default:"0" }}</span>
+            </a>
+            <a href="/qr-verify/" class="bg-white flex items-center gap-3 overflow-hidden p-4 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 hover:border-base-400 transition-colors">
+                <span class="material-symbols-outlined text-base-500" aria-hidden="true">qr_code_scanner</span>
+                <span class="font-medium text-sm text-font-important-light dark:text-font-important-dark">QR skaner</span>
+            </a>
+            <a href="/salaries/" class="bg-white flex items-center gap-3 overflow-hidden p-4 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 hover:border-base-400 transition-colors">
+                <span class="material-symbols-outlined text-base-500" aria-hidden="true">payments</span>
+                <span class="font-medium text-sm text-font-important-light dark:text-font-important-dark">Maosh hisob-kitobi</span>
+            </a>
+        </div>
+
         <!-- ===== KPI Cards ===== -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             <!-- Income -->
             <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
                 <span class="flex items-center justify-center w-12 h-12 rounded-full shrink-0 bg-purple-100 text-purple-600 dark:bg-purple-500/20 dark:text-purple-400">
-                    <span class="material-symbols-outlined">payments</span>
+                    <span class="material-symbols-outlined" aria-hidden="true">payments</span>
                 </span>
                 <div>
                     <p class="leading-relaxed mb-0 text-sm">Jami Tushum</p>
@@ -88,7 +111,7 @@
             <!-- Debt -->
             <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
                 <span class="flex items-center justify-center w-12 h-12 rounded-full shrink-0 bg-orange-100 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400">
-                    <span class="material-symbols-outlined">account_balance_wallet</span>
+                    <span class="material-symbols-outlined" aria-hidden="true">account_balance_wallet</span>
                 </span>
                 <div>
                     <p class="leading-relaxed mb-0 text-sm">Qarzdorlik</p>
@@ -101,13 +124,13 @@
             <!-- Pending confirmations -->
             <a href="/admin/main/transaction/?is_confirmed__exact=0" class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 hover:border-primary-500 transition-colors group">
                 <span class="flex items-center justify-center w-12 h-12 rounded-full shrink-0 bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400">
-                    <span class="material-symbols-outlined">pending_actions</span>
+                    <span class="material-symbols-outlined" aria-hidden="true">pending_actions</span>
                 </span>
                 <div>
                     <p class="leading-relaxed mb-0 text-sm">Tasdiqlanmagan to'lovlar</p>
                     <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-0.5 flex items-center gap-2">
                         {{ pending_count|default:"0" }} <span class="text-sm font-normal text-base-500">ta</span>
-                        <span class="material-symbols-outlined text-base-400 text-base group-hover:text-primary-600">arrow_forward</span>
+                        <span class="material-symbols-outlined text-base-400 text-base group-hover:text-primary-600" aria-hidden="true">arrow_forward</span>
                     </div>
                 </div>
             </a>
@@ -115,7 +138,7 @@
             <!-- Clients -->
             <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
                 <span class="flex items-center justify-center w-12 h-12 rounded-default shrink-0" style="background: rgba(37,99,235,0.12); color:#2563eb;">
-                    <span class="material-symbols-outlined">people</span>
+                    <span class="material-symbols-outlined" aria-hidden="true">people</span>
                 </span>
                 <div>
                     <p class="leading-relaxed mb-0 text-sm">Mijozlar Soni</p>
@@ -128,7 +151,7 @@
             <!-- Active groups -->
             <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
                 <span class="flex items-center justify-center w-12 h-12 rounded-default shrink-0" style="background: rgba(22,163,74,0.12); color:#16a34a;">
-                    <span class="material-symbols-outlined">groups</span>
+                    <span class="material-symbols-outlined" aria-hidden="true">groups</span>
                 </span>
                 <div>
                     <p class="leading-relaxed mb-0 text-sm">Faol Guruhlar</p>
@@ -141,7 +164,7 @@
             <!-- Transactions count -->
             <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
                 <span class="flex items-center justify-center w-12 h-12 rounded-full shrink-0 bg-pink-100 text-pink-600 dark:bg-pink-500/20 dark:text-pink-400">
-                    <span class="material-symbols-outlined">receipt_long</span>
+                    <span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>
                 </span>
                 <div>
                     <p class="leading-relaxed mb-0 text-sm">To'lovlar Soni</p>
@@ -219,7 +242,7 @@
             <!-- Operators Rating -->
             <div class="bg-white block flex flex-col grow overflow-hidden relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/2">
                 <div class="border-b border-base-200 flex flex-row items-center gap-2 py-4 px-6 dark:border-base-800">
-                    <span class="material-symbols-outlined text-primary-600 text-xl">leaderboard</span>
+                    <span class="material-symbols-outlined text-primary-600 text-xl" aria-hidden="true">leaderboard</span>
                     <h2 class="font-semibold text-[15px] text-important">Operatorlar reytingi</h2>
                 </div>
                 <div class="grow relative overflow-x-auto">
@@ -264,7 +287,7 @@
             <!-- Recent Transactions List -->
             <div class="bg-white block flex flex-col grow overflow-hidden relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/2">
                 <div class="border-b border-base-200 flex flex-row items-center gap-2 py-4 px-6 dark:border-base-800">
-                    <span class="material-symbols-outlined text-primary-600 text-xl">history</span>
+                    <span class="material-symbols-outlined text-primary-600 text-xl" aria-hidden="true">history</span>
                     <h2 class="font-semibold text-[15px] text-important">So'nggi To'lovlar</h2>
                 </div>
                 <div class="grow relative p-6">
@@ -273,7 +296,7 @@
                         <div class="flex flex-col gap-2 relative w-full">
                             <div class="flex flex-row relative z-20 items-center gap-2">
                                 <h3 class="text-font-important-light dark:text-font-important-dark text-sm">
-                                    {{ t.client.full_name }} <span class="text-xs text-base-500 ml-1">({{ t.group }})</span>
+                                    {% for c in t.clients.all %}{{ c.full_name }}{% if not forloop.last %}, {% endif %}{% endfor %} <span class="text-xs text-base-500 ml-1">({{ t.group }})</span>
                                 </h3>
                                 <strong class="bg-base-100 font-medium text-font-important-light ml-auto px-1.5 py-1 rounded-default text-xs dark:text-font-important-dark dark:bg-base-800">
                                     {{ t.amount|floatformat:0 }} UZS

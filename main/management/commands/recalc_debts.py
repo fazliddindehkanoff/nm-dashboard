@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db.models import Sum
 
-from main.models import Transaction, _recalc_group_debt
+from main.models import TransactionClient, _recalc_group_debt
 
 
 class Command(BaseCommand):
@@ -20,11 +20,11 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
 
-        before = Transaction.objects.aggregate(t=Sum("debt"))["t"] or 0
+        before = TransactionClient.objects.aggregate(t=Sum("debt"))["t"] or 0
 
         pairs = (
-            Transaction.objects.exclude(group__isnull=True)
-            .values_list("client_id", "group_id")
+            TransactionClient.objects.exclude(transaction__group__isnull=True)
+            .values_list("client_id", "transaction__group_id")
             .distinct()
         )
         pairs = list(pairs)
@@ -40,7 +40,7 @@ class Command(BaseCommand):
         for client_id, group_id in pairs:
             _recalc_group_debt(client_id, group_id)
 
-        after = Transaction.objects.aggregate(t=Sum("debt"))["t"] or 0
+        after = TransactionClient.objects.aggregate(t=Sum("debt"))["t"] or 0
         self.stdout.write(
             self.style.SUCCESS(
                 "Tayyor: {0} ta juftlik qayta hisoblandi. Jami qarz: {1} -> {2}".format(

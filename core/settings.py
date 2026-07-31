@@ -143,10 +143,12 @@ AMOCRM = {
 }
 
 # Telegram bot integratsiyasi.
-# To'lov tasdiqlanganda guruhning Telegram chatiga QR kod yuboriladi.
-# BotFather bergan tokenni TELEGRAM_BOT_TOKEN muhit o'zgaruvchisiga bering.
+# To'lov tasdiqlanganda bitta umumiy Telegram guruh chatiga QR kod yuboriladi.
+# BotFather bergan tokenni TELEGRAM_BOT_TOKEN, guruh chat ID sini esa
+# TELEGRAM_CHAT_ID muhit o'zgaruvchisiga bering (masalan -1001234567890).
 TELEGRAM = {
     "BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+    "CHAT_ID": os.environ.get("TELEGRAM_CHAT_ID", ""),
 }
 
 
@@ -197,29 +199,29 @@ UNFOLD = {
         "show_all_applications": False,
         "navigation": [
             {
-                "title": "Asosiy",
+                "title": "Ish stoli",
                 "separator": True,
                 "items": [
                     {
-                        "title": "Bosh sahifa",
+                        "title": "Dashboard",
                         "icon": "dashboard",
                         "link": "/admin/",
                         "permission": "main.permissions.is_not_plain_operator",
                     },
                     {
-                        "title": "Maoshlar",
+                        "title": "Maosh hisob-kitobi",
                         "icon": "payments",
                         "link": "/salaries/",
                     },
                     {
-                        "title": "QR tekshirish",
+                        "title": "QR skaner",
                         "icon": "qr_code_scanner",
                         "link": "/qr-verify/",
                     },
                 ],
             },
             {
-                "title": "Ma'lumotlar bazasi",
+                "title": "Ma'lumotlar",
                 "separator": True,
                 "items": [
                     {
@@ -251,7 +253,7 @@ UNFOLD = {
                 ],
             },
             {
-                "title": "To'lovlar",
+                "title": "Moliya",
                 "separator": True,
                 "items": [
                     {
@@ -261,13 +263,13 @@ UNFOLD = {
                         "active": _is_payments_view,
                     },
                     {
-                        "title": "Tasdiqlanmagan to'lovlar",
+                        "title": "Tasdiqlash navbati",
                         "icon": "pending_actions",
                         "link": "/admin/main/transaction/?is_confirmed__exact=0",
                         "active": _is_unconfirmed_transactions_view,
                     },
                     {
-                        "title": "Qaytarilgan to'lovlar",
+                        "title": "Qaytarilganlar",
                         "icon": "assignment_return",
                         "link": "/admin/main/transaction/?is_refunded__exact=1",
                         "active": _is_refunded_transactions_view,

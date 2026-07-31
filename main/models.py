@@ -1,5 +1,5 @@
 import uuid
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -30,13 +30,6 @@ class Group(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, verbose_name=_("Kurs"))
     teachers = models.ManyToManyField(Teacher, verbose_name=_("O'qituvchilar"), blank=True)
     start_date = models.DateField(_("Boshlanish sanasi"), null=True)
-    telegram_chat_id = models.CharField(
-        _("Telegram guruh ID"),
-        max_length=64,
-        null=True,
-        blank=True,
-        help_text=_("To'lov tasdiqlanganda QR kod yuboriladigan Telegram guruhning chat ID si (masalan -1001234567890)."),
-    )
     is_active = models.BooleanField(
         _("Faol"),
         default=True,
@@ -150,7 +143,9 @@ class Transaction(models.Model):
     )
 
     operator = models.ForeignKey(Operator, on_delete=models.SET_NULL, null=True, verbose_name=_("Operator"))
-    client = models.ForeignKey(Client, on_delete=models.CASCADE, verbose_name=_("Mijoz"))
+    clients = models.ManyToManyField(
+        Client, through='TransactionClient', related_name='transactions', verbose_name=_("Mijozlar"),
+    )
     group = models.ForeignKey(Group, on_delete=models.SET_NULL, null=True, verbose_name=_("Guruh/Kurs nomi"))
     date = models.DateField(_("Sanasi"))
     amount = models.DecimalField(_("To'lov miqdori"), max_digits=12, decimal_places=2)
@@ -206,7 +201,6 @@ class Transaction(models.Model):
 
     course_price = models.DecimalField(_("Kurs narxi"), max_digits=12, decimal_places=2, editable=False, default=0)
     discount_total = models.DecimalField(_("Jami chegirma"), max_digits=12, decimal_places=2, editable=False, default=0)
-    debt = models.DecimalField(_("Qarzi"), max_digits=12, decimal_places=2, editable=False, default=0)
 
     class Meta:
         verbose_name = _("To'lov")
@@ -232,31 +226,94 @@ class Transaction(models.Model):
 
         super().save(*args, **kwargs)
 
-        # Qarz mijoz+guruh bo'yicha JAMI to'lovlar asosida qayta hisoblanadi
-        # (shu jumladan hozirgina saqlangan to'lov). Shu tufayli bir guruhga
-        # ketma-ket to'lovlar (bron -> doplata) qarzni to'g'ri kamaytiradi.
-        _recalc_group_debt(self.client_id, self.group_id)
+        # Mijozlar (va ularning ulushlari/qarzi) shu tranzaksiyaga biriktirilgan
+        # bo'lsa — qayta hisoblaymiz. Yangi (hali mijozsiz) tranzaksiya uchun
+        # bu no-op: mijozlar keyinroq (inline formset orqali) biriktiriladi.
         if self.pk:
-            fresh = (
-                Transaction.objects.filter(pk=self.pk)
-                .values_list('debt', flat=True)
-                .first()
-            )
-            if fresh is not None:
-                self.debt = fresh
+            _recalc_transaction_participants(self)
 
     def __str__(self):
-        return f"{self.client.full_name} - {self.amount}"
+        names = ", ".join(c.full_name for c in self.clients.all()) if self.pk else ""
+        return f"{names or '—'} - {self.amount}"
+
+
+class TransactionClient(models.Model):
+    """Bitta to'lovdagi bitta mijozning ulushi (summa/chegirma/qarz).
+
+    Bir nechta mijoz bitta to'lovga biriktirilganda (masalan opa-uka bitta
+    chekda), to'lov summasi ular orasida teng bo'linadi — har birining ulushi
+    shu yerda saqlanadi va o'z guruhidagi qarzini mustaqil belgilaydi.
+    """
+
+    transaction = models.ForeignKey(
+        Transaction, on_delete=models.CASCADE, related_name='participants', verbose_name=_("To'lov"),
+    )
+    client = models.ForeignKey(
+        Client, on_delete=models.CASCADE, related_name='participations', verbose_name=_("Mijoz"),
+    )
+    share_amount = models.DecimalField(_("Ulush miqdori"), max_digits=12, decimal_places=2, default=0, editable=False)
+    share_discount = models.DecimalField(_("Ulush chegirmasi"), max_digits=12, decimal_places=2, default=0, editable=False)
+    debt = models.DecimalField(_("Qarzi"), max_digits=12, decimal_places=2, default=0, editable=False)
+
+    class Meta:
+        verbose_name = _("To'lov ishtirokchisi")
+        verbose_name_plural = _("To'lov ishtirokchilari")
+        constraints = [
+            models.UniqueConstraint(fields=['transaction', 'client'], name='uniq_transaction_client'),
+        ]
+
+    def __str__(self):
+        return f"{self.client.full_name} — #{self.transaction_id}"
+
+
+def _split_amount(total, n):
+    """`total` ni `n` ta ulushga aniq (tiyingacha) bo'lib beradi.
+
+    Yig'indi har doim `total` ga teng bo'ladi — qoldiq tiyinlar birinchi
+    qatorlarga bittadan qo'shiladi.
+    """
+    total = Decimal(str(total or 0))
+    cents_total = int((total * 100).to_integral_value(rounding=ROUND_HALF_UP))
+    base_cents, remainder_cents = divmod(cents_total, n)
+    return [
+        Decimal(base_cents + (1 if i < remainder_cents else 0)) / Decimal(100)
+        for i in range(n)
+    ]
+
+
+def _recalc_transaction_participants(transaction):
+    """Tranzaksiyaga biriktirilgan har bir mijozning ulushini (summa/chegirma)
+    qayta hisoblaydi, so'ng har biriga tegishli guruh qarzini yangilaydi."""
+    participants = list(
+        TransactionClient.objects.filter(transaction_id=transaction.pk).order_by('id')
+    )
+    if not participants:
+        return
+
+    n = len(participants)
+    amount_shares = _split_amount(transaction.amount, n)
+    discount_shares = _split_amount(transaction.discount_total, n)
+
+    for tc, a_share, d_share in zip(participants, amount_shares, discount_shares):
+        if tc.share_amount != a_share or tc.share_discount != d_share:
+            TransactionClient.objects.filter(pk=tc.pk).update(
+                share_amount=a_share, share_discount=d_share,
+            )
+
+    group_id = transaction.group_id
+    for client_id in {tc.client_id for tc in participants}:
+        _recalc_group_debt(client_id, group_id)
 
 
 def _recalc_group_debt(client_id, group_id):
-    """Bitta mijoz+guruh uchun qarzni barcha (qaytarilmagan) to'lovlar bo'yicha
+    """Bitta mijoz+guruh uchun qarzni barcha (qaytarilmagan) ulushlar bo'yicha
     qayta taqsimlaydi.
 
     Yakuniy narx = kurs narxi - jami chegirmalar. Qolgan qarz = yakuniy narx -
-    jami to'langan summa. Qolgan qarz eng oxirgi to'lovga yoziladi, qolganlari 0
-    bo'ladi — shunda dashboarddagi Sum(debt) haqiqiy qarzni beradi. Qaytarilgan
-    to'lovlar hisobga olinmaydi va ularning qarzi 0 ga tushiriladi.
+    jami to'langan summa. Qolgan qarz eng oxirgi ulushga (tranzaksiya+mijoz
+    juftligiga) yoziladi, qolganlari 0 bo'ladi — shunda dashboarddagi
+    Sum(debt) haqiqiy qarzni beradi. Qaytarilgan tranzaksiyalar hisobga
+    olinmaydi va ularning qarzi 0 ga tushiriladi.
     """
     if not client_id or not group_id:
         return
@@ -264,30 +321,30 @@ def _recalc_group_debt(client_id, group_id):
     def _dec(value):
         return Decimal(str(value or 0))
 
-    txns = list(
-        Transaction.objects.filter(
-            client_id=client_id, group_id=group_id, is_refunded=False
-        ).order_by('date', 'id')
+    rows = list(
+        TransactionClient.objects.filter(
+            client_id=client_id, transaction__group_id=group_id, transaction__is_refunded=False,
+        ).select_related('transaction__group__course').order_by('transaction__date', 'transaction_id')
     )
 
-    # Qaytarilgan to'lovlar qarzni saqlab qolmasligi kerak.
-    Transaction.objects.filter(
-        client_id=client_id, group_id=group_id, is_refunded=True
+    # Qaytarilgan tranzaksiyalar qarzni saqlab qolmasligi kerak.
+    TransactionClient.objects.filter(
+        client_id=client_id, transaction__group_id=group_id, transaction__is_refunded=True,
     ).exclude(debt=0).update(debt=0)
 
-    if not txns:
+    if not rows:
         return
 
-    course = txns[0].group.course
+    course = rows[0].transaction.group.course
     course_price = _dec(course.price)
-    total_discount = sum((_dec(t.discount_total) for t in txns), Decimal(0))
-    total_paid = sum((_dec(t.amount) for t in txns), Decimal(0))
+    total_discount = sum((_dec(r.share_discount) for r in rows), Decimal(0))
+    total_paid = sum((_dec(r.share_amount) for r in rows), Decimal(0))
 
     net_price = max(course_price - total_discount, Decimal(0))
     remaining = max(net_price - total_paid, Decimal(0))
 
-    latest = txns[-1]
-    for t in txns:
-        new_debt = remaining if t.pk == latest.pk else Decimal(0)
-        if _dec(t.debt) != new_debt:
-            Transaction.objects.filter(pk=t.pk).update(debt=new_debt)
+    latest = rows[-1]
+    for r in rows:
+        new_debt = remaining if r.pk == latest.pk else Decimal(0)
+        if _dec(r.debt) != new_debt:
+            TransactionClient.objects.filter(pk=r.pk).update(debt=new_debt)

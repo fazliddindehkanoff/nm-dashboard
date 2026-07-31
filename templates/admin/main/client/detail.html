@@ -4,7 +4,7 @@
 {% block breadcrumbs %}{% endblock %}
 
 {% block title %}
-    {{ group }} | {{ site_title|default:_('Django site admin') }}
+    {{ client }} | {{ site_title|default:_('Django site admin') }}
 {% endblock %}
 
 {% block content %}
@@ -15,10 +15,10 @@
         <div class="flex flex-col gap-1">
             <a href="{{ changelist_url }}" class="text-sm text-base-500 hover:text-primary-600 flex items-center gap-1 mb-1">
                 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
-                {% trans "Guruhlar" %}
+                {% trans "Mijozlar" %}
             </a>
             <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark">
-                {{ group }}
+                {{ client.full_name }}
             </div>
         </div>
 
@@ -42,30 +42,24 @@
 
     <div class="bg-base-200 dark:bg-base-800 h-px -mt-2"></div>
 
-    <!-- Guruh ma'lumotlari -->
+    <!-- Mijoz ma'lumotlari -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <div class="bg-white flex flex-col gap-1 overflow-hidden p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
-            <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Kurs" %}</p>
-            <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark">{{ group.course.name }}</div>
+            <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Telefon raqami" %}</p>
+            <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark">{{ client.phone_number|default:"—" }}</div>
         </div>
         <div class="bg-white flex flex-col gap-1 overflow-hidden p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
-            <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "O'qituvchilar" %}</p>
-            <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark">
-                {% for teacher in teachers %}{{ teacher.full_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
-            </div>
+            <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Operator" %}</p>
+            <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark">{{ client.operator.full_name|default:"—" }}</div>
         </div>
         <div class="bg-white flex flex-col gap-1 overflow-hidden p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
-            <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Boshlanish sanasi" %}</p>
-            <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark">{{ group.start_date|date:"d.m.Y"|default:"—" }}</div>
+            <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Qo'shilgan guruhlar" %}</p>
+            <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark">{{ joined_groups_count }} {% trans "ta" %}</div>
         </div>
         <div class="bg-white flex flex-col gap-1 overflow-hidden p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
-            <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Holati" %}</p>
-            <div>
-                {% if group.is_active %}
-                <span class="bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Faol" %}</span>
-                {% else %}
-                <span class="bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Nofaol" %}</span>
-                {% endif %}
+            <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Qarzi" %}</p>
+            <div class="font-semibold text-base {% if loan_amount > 0 %}text-red-600 dark:text-red-400{% else %}text-font-important-light dark:text-font-important-dark{% endif %}">
+                {{ loan_amount|floatformat:0 }} <span class="text-xs font-normal text-base-500">UZS</span>
             </div>
         </div>
     </div>
@@ -73,18 +67,19 @@
     <!-- To'lovlar jadvali -->
     <div class="bg-white block flex flex-col grow overflow-hidden relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
         <div class="border-b border-base-200 flex flex-row items-center justify-between py-4 px-6 dark:border-base-800">
-            <h2 class="font-semibold text-[15px] text-important">{% trans "To'lovlar" %}</h2>
+            <h2 class="font-semibold text-[15px] text-important">{% trans "To'lovlar tarixi" %}</h2>
             <span class="bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-full text-xs">{{ transactions|length }}</span>
         </div>
         <div class="grow relative overflow-x-auto">
             <table class="w-full text-sm">
                 <thead>
                     <tr class="border-b border-base-200 dark:border-base-800 text-left text-xs uppercase text-base-500">
-                        <th class="py-3 px-6 font-medium">{% trans "Mijoz" %}</th>
+                        <th class="py-3 px-6 font-medium">{% trans "Guruh/Kurs nomi" %}</th>
                         <th class="py-3 px-6 font-medium">{% trans "Operator" %}</th>
                         <th class="py-3 px-6 font-medium text-right">{% trans "Miqdor" %}</th>
                         <th class="py-3 px-6 font-medium">{% trans "To'lov turi" %}</th>
-                        <th class="py-3 px-6 font-medium">{% trans "Tasdiq" %}</th>
+                        <th class="py-3 px-6 font-medium">{% trans "Holati" %}</th>
+                        <th class="py-3 px-6 font-medium text-right">{% trans "Qarzi" %}</th>
                         <th class="py-3 px-6 font-medium text-right">{% trans "Sana" %}</th>
                     </tr>
                 </thead>
@@ -92,25 +87,26 @@
                     {% for tx in transactions %}
                     <tr class="border-b border-base-200 dark:border-base-800 last:border-0 hover:bg-base-50 dark:hover:bg-base-800/50">
                         <td class="py-3 px-6 text-font-important-light dark:text-font-important-dark">
-                            <a href="{% url 'admin:main_transaction_change' tx.pk %}" class="text-primary-600 dark:text-primary-500 hover:underline">{% for c in tx.clients.all %}{{ c.full_name }}{% if not forloop.last %}, {% endif %}{% endfor %}</a>
+                            <a href="{% url 'admin:main_transaction_change' tx.transaction_id %}" class="text-primary-600 dark:text-primary-500 hover:underline">{{ tx.transaction.group|default:"—" }}</a>
                         </td>
-                        <td class="py-3 px-6">{{ tx.operator.full_name|default:"—" }}</td>
-                        <td class="py-3 px-6 text-right font-medium text-font-important-light dark:text-font-important-dark">{{ tx.amount|floatformat:0 }}</td>
-                        <td class="py-3 px-6">{{ tx.get_payment_type_display }}</td>
+                        <td class="py-3 px-6">{{ tx.transaction.operator.full_name|default:"—" }}</td>
+                        <td class="py-3 px-6 text-right font-medium text-font-important-light dark:text-font-important-dark">{{ tx.share_amount|floatformat:0 }}</td>
+                        <td class="py-3 px-6">{{ tx.transaction.get_payment_type_display }}</td>
                         <td class="py-3 px-6">
-                            {% if tx.is_refunded %}
+                            {% if tx.transaction.is_refunded %}
                             <span class="bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Qaytarilgan" %}</span>
-                            {% elif tx.is_confirmed %}
+                            {% elif tx.transaction.is_confirmed %}
                             <span class="bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Tasdiqlangan" %}</span>
                             {% else %}
                             <span class="bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Kutilmoqda" %}</span>
                             {% endif %}
                         </td>
-                        <td class="py-3 px-6 text-right text-base-500">{{ tx.date|date:"d.m.Y" }}</td>
+                        <td class="py-3 px-6 text-right {% if tx.debt > 0 %}text-red-600 dark:text-red-400 font-medium{% else %}text-base-500{% endif %}">{{ tx.debt|floatformat:0 }}</td>
+                        <td class="py-3 px-6 text-right text-base-500">{{ tx.transaction.date|date:"d.m.Y" }}</td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="6" class="text-sm text-base-500 text-center py-6">{% trans "Bu guruh uchun to'lovlar yo'q" %}</td>
+                        <td colspan="7" class="text-sm text-base-500 text-center py-6">{% trans "Bu mijoz uchun to'lovlar yo'q" %}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

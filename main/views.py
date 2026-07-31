@@ -2,12 +2,12 @@ import uuid as uuid_lib
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import admin
-from .models import Operator, Transaction, Client, Group
+from .models import Operator, Transaction, TransactionClient, Client, Group
 from django.db.models import Sum, Count
 from datetime import datetime
 
 import json
-from django.db.models.functions import TruncMonth, ExtractMonth
+from django.db.models.functions import TruncMonth, ExtractMonth, ExtractYear
 from datetime import timedelta
 
 # Pie/doughnut chart uchun rang palitrasi
@@ -171,8 +171,10 @@ def dashboard_callback(request, context):
         "total_groups": Group.objects.filter(is_active=True).count(),
         "transactions_count": transactions.count(),
         "pending_count": transactions.filter(is_confirmed=False).count(),
-        "total_debt": transactions.aggregate(total=Sum('debt'))['total'] or 0,
-        "recent_transactions": transactions.select_related('client', 'group').order_by('-date', '-id')[:6],
+        "total_debt": TransactionClient.objects.filter(transaction__in=transactions).aggregate(
+            total=Sum('debt')
+        )['total'] or 0,
+        "recent_transactions": transactions.prefetch_related('clients').select_related('group').order_by('-date', '-id')[:6],
         "operators": Operator.objects.all() if not is_plain_op else Operator.objects.filter(id=request.user.operator.id),
         "months": [
             (1, "Yanvar", monthly_counts.get(1, 0)),
@@ -214,15 +216,15 @@ def dashboard_callback(request, context):
     context.update(build_statistics(transactions))
     return context
 
-def calculate_salary_percentage(sales_count):
-    """Oylik sotuvlar soniga qarab operator maoshining foizini qaytaradi."""
-    if sales_count > 150:
+def calculate_salary_percentage(total_amount):
+    """Oylik sotuvlar summasiga (so'mda) qarab operator maoshining foizini qaytaradi."""
+    if total_amount > 150_000_000:
         return 9
-    elif sales_count > 100:
+    elif total_amount > 100_000_000:
         return 8
-    elif sales_count > 50:
+    elif total_amount > 50_000_000:
         return 5
-    elif sales_count > 30:
+    elif total_amount > 30_000_000:
         return 2
     else:
         return 1
@@ -231,6 +233,7 @@ def calculate_salary_percentage(sales_count):
 @staff_member_required
 def salaries(request):
     month_filter = request.GET.get('month')
+    year_filter = request.GET.get('year')
     operator_filter = request.GET.get('operator_id')
 
     is_plain_op = not request.user.is_superuser and hasattr(request.user, 'operator')
@@ -246,17 +249,29 @@ def salaries(request):
             filtered_operators = filtered_operators.filter(id=operator_filter)
 
     selected_month = int(month_filter) if month_filter else datetime.now().month
+    selected_year = int(year_filter) if year_filter else datetime.now().year
 
-    # Compute monthly counts for badges (respecting operator filtering)
-    count_qs = Transaction.objects.filter(is_refunded=False)
+    # "Faqat tasdiqlangan, qaytarilmagan" to'lovlar bazaviy filtri (badge va
+    # asosiy hisob-kitob uchun umumiy).
+    base_qs = Transaction.objects.filter(is_refunded=False, is_confirmed=True)
     if is_plain_op:
-        count_qs = count_qs.filter(operator=request.user.operator)
+        base_qs = base_qs.filter(operator=request.user.operator)
     elif operator_filter:
-        count_qs = count_qs.filter(operator_id=operator_filter)
+        base_qs = base_qs.filter(operator_id=operator_filter)
 
+    # Badge'larda ko'rsatiladigan yillar ro'yxati (mavjud ma'lumotlar + tanlangan yil).
+    available_years = sorted(
+        base_qs.annotate(year=ExtractYear('date')).values_list('year', flat=True).distinct(),
+        reverse=True,
+    )
+    if selected_year not in available_years:
+        available_years = sorted(set(available_years) | {selected_year}, reverse=True)
+
+    # Oy bo'yicha badge sonlari (tanlangan yil bo'yicha)
     monthly_counts = {
         item['month']: item['count']
-        for item in count_qs.annotate(month=ExtractMonth('date')).values('month').annotate(count=Count('id'))
+        for item in base_qs.filter(date__year=selected_year)
+        .annotate(month=ExtractMonth('date')).values('month').annotate(count=Count('id'))
     }
 
     months = [
@@ -281,12 +296,14 @@ def salaries(request):
     for operator in filtered_operators:
         transactions = Transaction.objects.filter(
             operator=operator,
+            date__year=selected_year,
             date__month=selected_month,
             is_refunded=False,
+            is_confirmed=True,
         )
         sales_count = transactions.count()
         total_collected = transactions.aggregate(total=Sum('amount'))['total'] or 0
-        percentage = calculate_salary_percentage(sales_count)
+        percentage = calculate_salary_percentage(float(total_collected))
         salary = float(total_collected) * (percentage / 100)
 
         total_salary += salary
@@ -306,18 +323,20 @@ def salaries(request):
         'rows': rows,
         'operators': operators,
         'months': months,
+        'available_years': available_years,
         'selected_month': selected_month,
+        'selected_year': selected_year,
         'selected_operator': int(operator_filter) if operator_filter else '',
         'is_plain_operator': is_plain_op,
         'total_salary': total_salary,
         'total_collected_all': total_collected_all,
         'total_sales_all': total_sales_all,
         'salary_tiers': [
-            ("0 - 30", "1%"),
-            ("30 - 50", "2%"),
-            ("50 - 100", "5%"),
-            ("100 dan ortiq", "8%"),
-            ("150 dan ortiq", "9%"),
+            ("0 - 30 mln", "1%"),
+            ("30 - 50 mln", "2%"),
+            ("50 - 100 mln", "5%"),
+            ("100 - 150 mln", "8%"),
+            ("150 mln dan ortiq", "9%"),
         ],
     }
     context.update(admin.site.each_context(request))
@@ -359,20 +378,23 @@ def qr_verify(request):
             )
             if client:
                 transactions = list(
-                    Transaction.objects
+                    TransactionClient.objects
                     .filter(client=client)
-                    .select_related('group', 'group__course', 'operator', 'discount')
-                    .order_by('-date', '-id')
+                    .select_related(
+                        'transaction', 'transaction__group', 'transaction__group__course',
+                        'transaction__operator', 'transaction__discount',
+                    )
+                    .order_by('-transaction__date', '-transaction_id')
                 )
-                active = [t for t in transactions if not t.is_refunded]
+                active = [tc for tc in transactions if not tc.transaction.is_refunded]
                 summary = {
-                    'total_paid': sum((t.amount for t in active), 0),
-                    'total_debt': sum((t.debt for t in active), 0),
+                    'total_paid': sum((tc.share_amount for tc in active), 0),
+                    'total_debt': sum((tc.debt for tc in active), 0),
                     'count': len(transactions),
                     'courses': sorted({
-                        t.group.course.name
-                        for t in active
-                        if t.group and t.group.course_id
+                        tc.transaction.group.course.name
+                        for tc in active
+                        if tc.transaction.group and tc.transaction.group.course_id
                     }),
                 }
 
