@@ -11,7 +11,7 @@
 <div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-8">
 
     <div class="flex flex-col gap-1">
-        <a href="{{ change_url }}" class="text-sm text-base-500 hover:text-primary-600 flex items-center gap-1 mb-1">
+        <a href="{{ change_url }}" aria-label="To'lov sahifasiga qaytish" title="To'lov sahifasiga qaytish" class="text-sm text-base-500 hover:text-base-700 dark:hover:text-base-300 flex items-center gap-1 mb-1">
             <span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
             {% trans "To'lovga qaytish" %}
         </a>
@@ -53,6 +53,12 @@
                 <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Joriy qarz" %}</p>
                 <div class="font-semibold text-font-important-light dark:text-font-important-dark">{{ current_debt|floatformat:0 }} UZS</div>
             </div>
+            <div class="flex flex-col gap-1">
+                <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Holat" %}</p>
+                <div class="font-semibold text-font-important-light dark:text-font-important-dark">
+                    {% if object.is_refunded %}{% trans "Qaytarilgan" %}{% elif object.is_confirmed %}{% trans "Tasdiqlangan" %}{% else %}{% trans "Kutilmoqda" %}{% endif %}
+                </div>
+            </div>
         </div>
 
         {% if participants %}
@@ -74,14 +80,16 @@
         <form method="post" class="flex flex-col gap-4">
             {% csrf_token %}
             <div class="flex flex-col gap-1">
-                <label class="text-sm font-medium text-font-important-light dark:text-font-important-dark">{{ form.amount.label }}</label>
+                <label for="{{ form.amount.id_for_label }}" class="text-sm font-medium text-font-important-light dark:text-font-important-dark">{% trans "Qo'shiladigan summa" %}</label>
                 {{ form.amount }}
+                <p class="text-xs text-base-500 mb-0">{% trans "Bu summa hozirgi miqdorga qo'shiladi, umumiy to'lovni almashtirmaydi." %}</p>
                 {% for error in form.amount.errors %}
                 <div class="text-red-600 text-xs">{{ error }}</div>
                 {% endfor %}
             </div>
             <button type="submit"
-                    class="flex items-center justify-center gap-2 bg-primary-600 text-white font-medium px-4 py-2.5 rounded-default text-sm hover:bg-primary-700 transition-colors mt-2">
+                    aria-label="Qo'shimcha summani saqlash" title="Qo'shimcha summani saqlash"
+                    class="flex items-center justify-center gap-2 bg-base-900 text-white font-medium px-4 py-2.5 rounded-default text-sm hover:bg-base-700 transition-colors mt-2 dark:bg-base-100 dark:text-base-900 dark:hover:bg-base-200">
                 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>
                 {% trans "Saqlash" %}
             </button>

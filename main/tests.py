@@ -895,6 +895,18 @@ class ConfirmRefundPreviewTestCase(TestCase):
         self.assertFalse(tx.is_confirmed)
         self.assertIsNone(tx.confirmed_at)
 
+    def test_confirm_row_get_preview_does_not_mutate(self):
+        tx = self._tx()
+        path = f'/admin/main/transaction/{tx.pk}/confirm-row/'
+        request = _request_with_messages(self.superuser, path)
+        response = self.admin.confirm_transaction(request, str(tx.pk))
+        response.render()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.template_name, 'admin/main/transaction/confirm_confirm.html')
+        tx.refresh_from_db()
+        self.assertFalse(tx.is_confirmed)
+        self.assertIsNone(tx.confirmed_at)
+
     def test_confirm_post_mutates(self):
         tx = self._tx()
         request = _post_request_with_messages(
@@ -904,6 +916,20 @@ class ConfirmRefundPreviewTestCase(TestCase):
         )
         with mock.patch('main.admin.send_payment_qr', return_value=(True, 'ok')):
             response = self.admin.confirm_transaction_detail(request, str(tx.pk))
+        self.assertEqual(response.status_code, 302)
+        tx.refresh_from_db()
+        self.assertTrue(tx.is_confirmed)
+        self.assertEqual(tx.confirmed_by, self.superuser)
+
+    def test_confirm_row_post_mutates(self):
+        tx = self._tx()
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{tx.pk}/confirm-row/',
+            {'next': reverse('admin:main_transaction_changelist')},
+        )
+        with mock.patch('main.admin.send_payment_qr', return_value=(True, 'ok')):
+            response = self.admin.confirm_transaction(request, str(tx.pk))
         self.assertEqual(response.status_code, 302)
         tx.refresh_from_db()
         self.assertTrue(tx.is_confirmed)
@@ -921,6 +947,18 @@ class ConfirmRefundPreviewTestCase(TestCase):
         self.assertFalse(tx.is_refunded)
         self.assertIsNone(tx.refunded_at)
 
+    def test_refund_row_get_preview_does_not_mutate(self):
+        tx = self._tx()
+        path = f'/admin/main/transaction/{tx.pk}/refund-row/'
+        request = _request_with_messages(self.superuser, path)
+        response = self.admin.refund_transaction(request, str(tx.pk))
+        response.render()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.template_name, 'admin/main/transaction/refund_confirm.html')
+        tx.refresh_from_db()
+        self.assertFalse(tx.is_refunded)
+        self.assertIsNone(tx.refunded_at)
+
     def test_refund_post_mutates(self):
         tx = self._tx()
         request = _post_request_with_messages(
@@ -929,6 +967,19 @@ class ConfirmRefundPreviewTestCase(TestCase):
             {'next': reverse('admin:main_transaction_change', args=[tx.pk])},
         )
         response = self.admin.refund_transaction_detail(request, str(tx.pk))
+        self.assertEqual(response.status_code, 302)
+        tx.refresh_from_db()
+        self.assertTrue(tx.is_refunded)
+        self.assertEqual(tx.refunded_at, timezone.now().date())
+
+    def test_refund_row_post_mutates(self):
+        tx = self._tx()
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{tx.pk}/refund-row/',
+            {'next': reverse('admin:main_transaction_changelist')},
+        )
+        response = self.admin.refund_transaction(request, str(tx.pk))
         self.assertEqual(response.status_code, 302)
         tx.refresh_from_db()
         self.assertTrue(tx.is_refunded)

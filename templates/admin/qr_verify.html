@@ -25,37 +25,55 @@
           class="bg-white flex flex-col gap-3 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
         <label for="qr-input" class="text-xs font-semibold uppercase tracking-wider text-base-500 flex items-center gap-2">
             <span class="material-symbols-outlined text-[18px]" aria-hidden="true">qr_code_scanner</span>
-            {% trans "QR kodni skaner qiling" %}
+            {% trans "QR kod yoki mijoz UUID" %}
         </label>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-col sm:flex-row sm:items-center gap-3">
             <input type="text" name="code" id="qr-input" value="{{ code }}" autocomplete="off"
+                   aria-label="QR kod yoki mijoz UUID"
                    placeholder="{% trans 'Kursorni shu yerga joylang va skaner qiling...' %}"
-                   class="grow border border-base-200 bg-white text-base-700 rounded-default px-4 py-3 text-base focus:border-primary-600 focus:ring focus:ring-primary-600/20 dark:bg-base-800 dark:border-base-700 dark:text-base-200">
+                   class="grow border border-base-200 bg-white text-base-700 rounded-default px-4 py-3 text-base focus:border-base-500 focus:ring focus:ring-base-500/20 dark:bg-base-800 dark:border-base-700 dark:text-base-200">
             <button type="submit"
-                    class="flex items-center gap-2 bg-primary-600 text-white font-medium px-5 py-3 rounded-default text-sm hover:bg-primary-700 transition-colors">
+                    aria-label="QR kodni tekshirish" title="QR kodni tekshirish"
+                    class="flex items-center justify-center gap-2 bg-base-900 text-white font-medium px-5 py-3 rounded-default text-sm hover:bg-base-700 transition-colors dark:bg-base-100 dark:text-base-900 dark:hover:bg-base-200">
                 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">search</span>
-                {% trans "Qidirish" %}
+                {% trans "Skanerlash / qidirish" %}
             </button>
         </div>
     </form>
 
+    {% if not searched %}
+    <div class="bg-white border border-base-200 dark:bg-base-900 dark:border-base-800 rounded-default p-5 flex items-start gap-3">
+        <span class="material-symbols-outlined text-base-500" aria-hidden="true">info</span>
+        <div class="flex flex-col gap-1">
+            <div class="font-semibold text-sm text-font-important-light dark:text-font-important-dark">{% trans "Skaner tayyor" %}</div>
+            <p class="text-sm text-base-500 mb-0">{% trans "Inputga fokus berilgan. QR kodni skaner qiling yoki UUID ni kiriting." %}</p>
+        </div>
+    </div>
+    {% endif %}
+
     {% if searched %}
         {% if invalid_code %}
-        <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 dark:bg-yellow-500/10 dark:border-yellow-500/30 dark:text-yellow-300 rounded-default p-5 flex items-center gap-3">
-            <span class="material-symbols-outlined" aria-hidden="true">warning</span>
-            <span class="text-sm">{% trans "QR kod noto'g'ri formatda. Iltimos, qayta skaner qiling." %}</span>
+        <div class="bg-white border border-base-200 dark:bg-base-900 dark:border-base-800 rounded-default p-5 flex items-start gap-3">
+            <span class="material-symbols-outlined text-base-500" aria-hidden="true">warning</span>
+            <div class="flex flex-col gap-1">
+                <div class="font-semibold text-sm text-font-important-light dark:text-font-important-dark">{% trans "QR formati noto'g'ri" %}</div>
+                <p class="text-sm text-base-500 mb-0">{% trans "Kod UUID yoki UUID bilan tugaydigan havola bo'lishi kerak. Qayta skaner qiling yoki kodni qo'lda kiriting." %}</p>
+            </div>
         </div>
         {% elif not client %}
-        <div class="bg-red-50 border border-red-200 text-red-700 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-default p-5 flex items-center gap-3">
-            <span class="material-symbols-outlined" aria-hidden="true">person_off</span>
-            <span class="text-sm">{% trans "Bu QR kodga mos mijoz topilmadi." %}</span>
+        <div class="bg-white border border-base-200 dark:bg-base-900 dark:border-base-800 rounded-default p-5 flex items-start gap-3">
+            <span class="material-symbols-outlined text-base-500" aria-hidden="true">person_off</span>
+            <div class="flex flex-col gap-1">
+                <div class="font-semibold text-sm text-font-important-light dark:text-font-important-dark">{% trans "Mijoz topilmadi" %}</div>
+                <p class="text-sm text-base-500 mb-0">{% trans "Bu QR kod bazadagi mijoz UUIDlariga mos kelmadi. Keyingi amal: qayta skaner qiling yoki mijozni admin ro'yxatidan qidiring." %}</p>
+            </div>
         </div>
         {% else %}
 
         <!-- Mijoz kartasi -->
         <div class="bg-white overflow-hidden p-4 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 flex flex-row items-center justify-between gap-3">
             <div class="flex items-center gap-3">
-                <span class="flex items-center justify-center w-9 h-9 rounded-full shrink-0 bg-primary-100 text-primary-600 dark:bg-primary-500/20 dark:text-primary-400">
+                <span class="flex items-center justify-center w-9 h-9 rounded-full shrink-0 bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300">
                     <span class="material-symbols-outlined text-[20px]" aria-hidden="true">badge</span>
                 </span>
                 <div class="flex flex-col">
@@ -67,16 +85,17 @@
                 </div>
             </div>
             <a href="{% url 'admin:main_client_detail' client.pk %}"
-               class="flex items-center gap-1.5 text-primary-600 dark:text-primary-400 font-medium text-sm hover:underline shrink-0">
+               aria-label="Mijozning faqat o'qish profilini ochish" title="Mijoz profili"
+               class="flex items-center gap-1.5 text-base-700 dark:text-base-300 font-medium text-sm hover:underline shrink-0">
                 <span class="material-symbols-outlined text-[16px]" aria-hidden="true">visibility</span>
-                {% trans "Profil" %}
+                {% trans "Profilni ko'rish" %}
             </a>
         </div>
 
         <!-- Umumiy ma'lumot -->
-        <div class="grid grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
-                <span class="flex items-center justify-center w-11 h-11 rounded-full shrink-0 bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-400">
+                <span class="flex items-center justify-center w-11 h-11 rounded-full shrink-0 bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300">
                     <span class="material-symbols-outlined" aria-hidden="true">payments</span>
                 </span>
                 <div>
@@ -85,7 +104,7 @@
                 </div>
             </div>
             <div class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
-                <span class="flex items-center justify-center w-11 h-11 rounded-full shrink-0 bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-400">
+                <span class="flex items-center justify-center w-11 h-11 rounded-full shrink-0 bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300">
                     <span class="material-symbols-outlined" aria-hidden="true">account_balance_wallet</span>
                 </span>
                 <div>
@@ -94,7 +113,7 @@
                 </div>
             </div>
             <div class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
-                <span class="flex items-center justify-center w-11 h-11 rounded-full shrink-0 bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">
+                <span class="flex items-center justify-center w-11 h-11 rounded-full shrink-0 bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300">
                     <span class="material-symbols-outlined" aria-hidden="true">receipt_long</span>
                 </span>
                 <div>
@@ -110,7 +129,7 @@
             <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "To'lov qilingan kurslar" %}</p>
             <div class="flex flex-wrap gap-2">
                 {% for course in summary.courses %}
-                <span class="bg-primary-100 text-primary-700 dark:bg-primary-500/20 dark:text-primary-300 font-medium px-3 py-1.5 rounded-full text-sm flex items-center gap-1.5">
+                <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-3 py-1.5 rounded-full text-sm flex items-center gap-1.5">
                     <span class="material-symbols-outlined text-[16px]" aria-hidden="true">school</span>{{ course }}
                 </span>
                 {% endfor %}
@@ -143,14 +162,14 @@
                             <td class="py-3 px-6">{{ tx.transaction.get_payment_type_display }}</td>
                             <td class="py-3 px-6">
                                 {% if tx.transaction.is_refunded %}
-                                <span class="bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Qaytarilgan" %}</span>
+                                <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Qaytarilgan" %}</span>
                                 {% elif tx.transaction.is_confirmed %}
-                                <span class="bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Tasdiqlangan" %}</span>
+                                <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Tasdiqlangan" %}</span>
                                 {% else %}
-                                <span class="bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Kutilmoqda" %}</span>
+                                <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Kutilmoqda" %}</span>
                                 {% endif %}
                             </td>
-                            <td class="py-3 px-6 text-right {% if tx.debt %}text-red-600 dark:text-red-400 font-medium{% else %}text-base-500{% endif %}">{{ tx.debt|floatformat:0 }}</td>
+                            <td class="py-3 px-6 text-right {% if tx.debt %}text-font-important-light dark:text-font-important-dark font-medium{% else %}text-base-500{% endif %}">{{ tx.debt|floatformat:0 }}</td>
                             <td class="py-3 px-6 text-right text-base-500">{{ tx.transaction.date|date:"d.m.Y" }}</td>
                         </tr>
                         {% empty %}
