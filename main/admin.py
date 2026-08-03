@@ -641,9 +641,10 @@ class TransactionAdmin(ModelAdmin):
     form = TransactionForm
     inlines = (TransactionClientInline,)
     list_display = (
-        'clients_display', 'operator', 'group', 'amount', 'payment_type',
+        'transaction_link', 'operator', 'group', 'amount', 'payment_type',
         'discount_total', 'source', 'confirmed_badge', 'refunded_badge', 'total_debt_display', 'date',
     )
+    list_display_links = None
     list_filter = ('is_confirmed', 'is_refunded', 'payment_type', 'source', 'operator', 'group')
     search_fields = ('clients__full_name', 'operator__full_name')
     readonly_fields = (
@@ -655,6 +656,59 @@ class TransactionAdmin(ModelAdmin):
 
     list_before_template = "admin/main/transaction/month_filter_badges.html"
     change_form_outer_after_template = "admin/main/transaction/subtransactions_table.html"
+
+    # To'lov satri faqat o'qiladigan detail sahifani ochadi. Asl Django
+    # tahrirlash formasi detail sahifadagi alohida tugma orqali ochiladi.
+    def get_urls(self):
+        urls = super().get_urls()
+        info = self.model._meta.app_label, self.model._meta.model_name
+        custom = [
+            path(
+                "<path:object_id>/detail/",
+                self.admin_site.admin_view(self.transaction_detail_view),
+                name="%s_%s_detail" % info,
+            ),
+        ]
+        return custom + urls
+
+    def transaction_detail_view(self, request, object_id):
+        obj = self.get_object(request, object_id)
+        if obj is None:
+            self.message_user(request, _("To'lov topilmadi."), level=messages.ERROR)
+            return redirect("admin:main_transaction_changelist")
+
+        summary = self._receive_payment_summary(obj)
+        context = {
+            **self.admin_site.each_context(request),
+            **summary,
+            "title": _("To'lov #%(id)s") % {"id": obj.pk},
+            "transaction": obj,
+            "original": obj,
+            "change_url": reverse("admin:main_transaction_change", args=[obj.pk]),
+            "changelist_url": reverse("admin:main_transaction_changelist"),
+            "confirm_url": reverse(
+                "admin:main_transaction_confirm_transaction_detail", args=[obj.pk]
+            ),
+            "refund_url": reverse(
+                "admin:main_transaction_refund_transaction_detail", args=[obj.pk]
+            ),
+            "receive_payment_url": reverse(
+                "admin:main_transaction_receive_payment_detail", args=[obj.pk]
+            ),
+            "has_change_permission": self.has_change_permission(request, obj),
+            "can_confirm": (
+                self.has_confirm_permission(request, obj)
+                and not obj.is_confirmed
+                and not obj.is_refunded
+            ),
+            "can_refund": self.has_refund_permission(request, obj) and not obj.is_refunded,
+            "can_receive_payment": (
+                self.has_receive_payment_permission(request, obj)
+                and summary["can_receive_payment"]
+            ),
+            "opts": self.model._meta,
+        }
+        return TemplateResponse(request, "admin/main/transaction/detail.html", context)
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
@@ -924,7 +978,7 @@ class TransactionAdmin(ModelAdmin):
             'title': _("Pul qabul qilish"),
             'object': obj,
             'form': form,
-            'change_url': reverse('admin:main_transaction_change', args=[obj.pk]),
+            'change_url': reverse('admin:main_transaction_detail', args=[obj.pk]),
             'opts': self.model._meta,
         }
         return TemplateResponse(request, "admin/main/transaction/receive_payment.html", context)
@@ -990,9 +1044,19 @@ class TransactionAdmin(ModelAdmin):
             _("Ichki to'lov qabul qilindi va admin tasdig'iga yuborildi."),
             level=messages.SUCCESS,
         )
-        return redirect('admin:main_transaction_change', object_id)
+        return redirect('admin:main_transaction_detail', object_id)
 
     # ---- Ustunlar / ko'rinish ----
+    @display(description=_("Mijozlar"))
+    def transaction_link(self, obj):
+        url = reverse("admin:main_transaction_detail", args=[obj.pk])
+        names = [client.full_name for client in obj.clients.all()]
+        return format_html(
+            '<a href="{}" class="text-base-700 dark:text-base-300 font-medium hover:underline">{}</a>',
+            url,
+            ", ".join(names) if names else _("To'lov #%(id)s") % {"id": obj.pk},
+        )
+
     @display(description=_("Mijozlar"))
     def clients_display(self, obj):
         names = [c.full_name for c in obj.clients.all()]
@@ -1094,7 +1158,7 @@ class TransactionAdmin(ModelAdmin):
 
     def _confirmation_cancel_url(self, request, object_id, detail=False):
         fallback = (
-            reverse('admin:main_transaction_change', args=[object_id])
+            reverse('admin:main_transaction_detail', args=[object_id])
             if detail else reverse('admin:main_transaction_changelist')
         )
         return self._safe_redirect_url(request, request.META.get('HTTP_REFERER'), fallback)
@@ -1282,7 +1346,7 @@ class SubTransactionAdmin(ModelAdmin):
     def transaction_link(self, obj):
         return format_html(
             '<a href="{}" class="text-primary-600 dark:text-primary-400 hover:underline">#{}</a>',
-            reverse('admin:main_transaction_change', args=[obj.transaction_id]),
+            reverse('admin:main_transaction_detail', args=[obj.transaction_id]),
             obj.transaction_id,
         )
 

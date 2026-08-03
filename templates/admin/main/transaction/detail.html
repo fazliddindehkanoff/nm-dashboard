@@ -1,0 +1,146 @@
+{% extends 'unfold/layouts/base.html' %}
+{% load i18n tz %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block title %}
+    {% blocktrans with id=transaction.pk %}To'lov #{{ id }}{% endblocktrans %} | {{ site_title|default:_('Django site admin') }}
+{% endblock %}
+
+{% block content %}
+<div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-8">
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+            <a href="{{ changelist_url }}" class="text-sm text-base-500 hover:text-base-700 dark:hover:text-base-300 flex items-center gap-1 mb-1">
+                <span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
+                {% trans "To'lovlar" %}
+            </a>
+            <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark">
+                {% blocktrans with id=transaction.pk %}To'lov #{{ id }}{% endblocktrans %}
+            </div>
+            <p class="text-sm text-base-500 mb-0">
+                {% for client in transaction.clients.all %}{{ client.full_name }}{% if not forloop.last %}, {% endif %}{% empty %}{% trans "Mijoz biriktirilmagan" %}{% endfor %}
+            </p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+            {% if can_confirm %}
+            <a href="{{ confirm_url }}"
+               class="min-h-11 inline-flex items-center gap-2 border border-base-300 text-base-700 dark:border-base-700 dark:text-base-300 font-medium px-4 py-2 rounded-default text-sm hover:bg-base-100 dark:hover:bg-base-800 transition-colors">
+                <span class="material-symbols-outlined text-[18px]" aria-hidden="true">check_circle</span>
+                {% trans "Tasdiqlash" %}
+            </a>
+            {% endif %}
+            {% if can_receive_payment %}
+            <a href="{{ receive_payment_url }}"
+               class="min-h-11 inline-flex items-center gap-2 border border-base-300 text-base-700 dark:border-base-700 dark:text-base-300 font-medium px-4 py-2 rounded-default text-sm hover:bg-base-100 dark:hover:bg-base-800 transition-colors">
+                <span class="material-symbols-outlined text-[18px]" aria-hidden="true">payments</span>
+                {% trans "Pul qabul qilish" %}
+            </a>
+            {% endif %}
+            {% if can_refund %}
+            <a href="{{ refund_url }}"
+               class="min-h-11 inline-flex items-center gap-2 border border-base-300 text-base-700 dark:border-base-700 dark:text-base-300 font-medium px-4 py-2 rounded-default text-sm hover:bg-base-100 dark:hover:bg-base-800 transition-colors">
+                <span class="material-symbols-outlined text-[18px]" aria-hidden="true">undo</span>
+                {% trans "Qaytarish" %}
+            </a>
+            {% endif %}
+            {% if has_change_permission %}
+            <a href="{{ change_url }}"
+               class="min-h-11 inline-flex items-center gap-2 bg-base-900 text-white dark:bg-base-100 dark:text-base-900 font-medium px-4 py-2 rounded-default text-sm hover:bg-base-700 dark:hover:bg-base-200 transition-colors">
+                <span class="material-symbols-outlined text-[18px]" aria-hidden="true">edit</span>
+                {% trans "Tahrirlash" %}
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="bg-base-200 dark:bg-base-800 h-px -mt-2"></div>
+
+    <section class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-800 rounded-default shadow-xs overflow-hidden" aria-labelledby="transaction-info-title">
+        <div class="px-4 sm:px-6 py-4 border-b border-base-200 dark:border-base-800 flex items-center justify-between gap-3">
+            <h2 id="transaction-info-title" class="font-semibold text-font-important-light dark:text-font-important-dark mb-0">
+                {% trans "To'lov ma'lumotlari" %}
+            </h2>
+            {% if transaction.is_refunded %}
+            <span class="inline-flex items-center gap-1 rounded-full bg-base-100 dark:bg-base-800 px-2.5 py-1 text-xs font-medium text-base-700 dark:text-base-300">
+                <span class="material-symbols-outlined text-[15px]" aria-hidden="true">undo</span>{% trans "Qaytarilgan" %}
+            </span>
+            {% elif transaction.is_confirmed %}
+            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium" style="background:rgba(15,118,110,.12);color:#0f766e">
+                <span class="material-symbols-outlined text-[15px]" aria-hidden="true">check_circle</span>{% trans "Tasdiqlangan" %}
+            </span>
+            {% else %}
+            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium" style="background:rgba(180,83,9,.12);color:#b45309">
+                <span class="material-symbols-outlined text-[15px]" aria-hidden="true">hourglass_top</span>{% trans "Kutilmoqda" %}
+            </span>
+            {% endif %}
+        </div>
+
+        <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="px-4 sm:px-6 py-4 border-b sm:border-r border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Mijozlar" %}</dt>
+                <dd class="font-semibold text-font-important-light dark:text-font-important-dark mb-0">
+                    {% for client in transaction.clients.all %}{{ client.full_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+                </dd>
+            </div>
+            <div class="px-4 sm:px-6 py-4 border-b lg:border-r border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Guruh / kurs" %}</dt>
+                <dd class="font-semibold text-font-important-light dark:text-font-important-dark mb-0">{{ transaction.group|default:"—" }}</dd>
+            </div>
+            <div class="px-4 sm:px-6 py-4 border-b sm:border-r border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Operator" %}</dt>
+                <dd class="font-semibold text-font-important-light dark:text-font-important-dark mb-0">{{ transaction.operator|default:"—" }}</dd>
+            </div>
+            <div class="px-4 sm:px-6 py-4 border-b border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Sana" %}</dt>
+                <dd class="font-semibold text-font-important-light dark:text-font-important-dark mb-0">{{ transaction.date|date:"d.m.Y" }}</dd>
+            </div>
+
+            <div class="px-4 sm:px-6 py-4 border-b sm:border-r border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Asosiy summa" %}</dt>
+                <dd class="font-semibold tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ initial_amount|floatformat:0 }} UZS</dd>
+            </div>
+            <div class="px-4 sm:px-6 py-4 border-b lg:border-r border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Hozirgi summa" %}</dt>
+                <dd class="font-semibold tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ transaction.amount|floatformat:0 }} UZS</dd>
+            </div>
+            <div class="px-4 sm:px-6 py-4 border-b sm:border-r border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "To'lov turi" %}</dt>
+                <dd class="font-semibold text-font-important-light dark:text-font-important-dark mb-0">{{ transaction.get_payment_type_display }}</dd>
+            </div>
+            <div class="px-4 sm:px-6 py-4 border-b border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Chegirma" %}</dt>
+                <dd class="font-semibold tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ discount_total|floatformat:0 }} UZS</dd>
+            </div>
+
+            <div class="px-4 sm:px-6 py-4 sm:border-r border-b sm:border-b-0 border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Manba" %}</dt>
+                <dd class="font-semibold text-font-important-light dark:text-font-important-dark mb-0">{{ transaction.get_source_display }}</dd>
+            </div>
+            <div class="px-4 sm:px-6 py-4 lg:border-r border-b lg:border-b-0 border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Tasdiqlagan" %}</dt>
+                <dd class="font-semibold text-font-important-light dark:text-font-important-dark mb-0">{{ transaction.confirmed_by|default:"—" }}</dd>
+            </div>
+            <div class="px-4 sm:px-6 py-4 sm:border-r border-b sm:border-b-0 border-base-200 dark:border-base-800">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Tasdiqlangan vaqt" %}</dt>
+                <dd class="font-semibold text-font-important-light dark:text-font-important-dark mb-0">
+                    {% if transaction.confirmed_at %}{% timezone "Asia/Tashkent" %}{{ transaction.confirmed_at|date:"d.m.Y H:i" }}{% endtimezone %}{% else %}—{% endif %}
+                </dd>
+            </div>
+            <div class="px-4 sm:px-6 py-4">
+                <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Chek" %}</dt>
+                <dd class="font-semibold mb-0">
+                    {% if transaction.screenshot %}
+                    <a href="{{ transaction.screenshot.url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-1.5 text-primary-600 dark:text-primary-400 hover:underline">
+                        <span class="material-symbols-outlined text-[18px]" aria-hidden="true">receipt_long</span>{% trans "Ko'rish" %}
+                    </a>
+                    {% else %}<span class="text-base-500">—</span>{% endif %}
+                </dd>
+            </div>
+        </dl>
+    </section>
+
+    {% include "admin/main/transaction/subtransactions_table.html" with original=transaction embedded=True %}
+</div>
+{% endblock %}

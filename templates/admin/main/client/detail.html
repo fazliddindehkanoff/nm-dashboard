@@ -87,7 +87,7 @@
                     {% for tx in transactions %}
                     <tr class="border-b border-base-200 dark:border-base-800 last:border-0 hover:bg-base-50 dark:hover:bg-base-800/50">
                         <td class="py-3 px-6 text-font-important-light dark:text-font-important-dark">
-                            <a href="{% url 'admin:main_transaction_change' tx.transaction_id %}" class="text-base-700 dark:text-base-300 hover:underline">{{ tx.transaction.group|default:"—" }}</a>
+                            <a href="{% url 'admin:main_transaction_detail' tx.transaction_id %}" class="text-base-700 dark:text-base-300 hover:underline">{{ tx.transaction.group|default:"—" }}</a>
                         </td>
                         <td class="py-3 px-6">{{ tx.transaction.operator.full_name|default:"—" }}</td>
                         <td class="py-3 px-6 text-right font-medium text-font-important-light dark:text-font-important-dark">{{ tx.share_amount|floatformat:0 }}</td>

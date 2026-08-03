@@ -1525,7 +1525,7 @@ class ConfirmRefundPreviewTestCase(TestCase):
         with mock.patch('main.admin.send_payment_qr', return_value=(True, 'ok')):
             response = self.admin.confirm_transaction_detail(request, str(tx.pk))
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response['Location'], reverse('admin:main_transaction_change', args=[tx.pk]))
+        self.assertEqual(response['Location'], reverse('admin:main_transaction_detail', args=[tx.pk]))
 
     def test_refund_post_rejects_external_next_url(self):
         tx = self._tx()
@@ -1838,6 +1838,61 @@ class ClientDetailViewTestCase(TestCase):
         request = _request_with_messages(self.superuser)
         response = self.admin.client_detail_view(request, '999999')
         self.assertEqual(response.status_code, 302)
+
+
+class TransactionDetailViewTestCase(TestCase):
+    def setUp(self):
+        from django.contrib.admin.sites import AdminSite
+        self.admin = TransactionAdmin(Transaction, AdminSite())
+        self.superuser = User.objects.create_superuser(username='transaction-detail-admin', password='x')
+        self.course = Course.objects.create(name='Detail Course', price=1000000)
+        self.group = Group.objects.create(course=self.course, start_date=date.today(), is_active=True)
+        self.client_obj = Client.objects.create(
+            full_name='Transaction Detail Client', phone_number='+998901234567'
+        )
+        self.transaction = _create_transaction_with_clients(
+            self.client_obj,
+            group=self.group,
+            amount=Decimal('250000'),
+            payment_type='naqd',
+            is_confirmed=False,
+        )
+
+    def test_detail_is_read_only_and_links_to_original_change_form(self):
+        request = _request_with_messages(
+            self.superuser,
+            reverse('admin:main_transaction_detail', args=[self.transaction.pk]),
+        )
+        response = self.admin.transaction_detail_view(request, str(self.transaction.pk))
+        response.render()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.template_name, 'admin/main/transaction/detail.html')
+        self.assertEqual(
+            response.context_data['change_url'],
+            reverse('admin:main_transaction_change', args=[self.transaction.pk]),
+        )
+        self.assertContains(response, 'Tahrirlash')
+        self.assertNotContains(response, 'name="amount"')
+        self.assertNotContains(response, 'id="id_amount"')
+
+    def test_edit_button_target_keeps_original_edit_form(self):
+        self.client.force_login(self.superuser)
+        response = self.client.get(
+            reverse('admin:main_transaction_change', args=[self.transaction.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="amount"')
+
+    def test_transaction_list_link_targets_detail(self):
+        request = _request_with_messages(self.superuser)
+        obj = self.admin.get_queryset(request).get(pk=self.transaction.pk)
+        link = str(self.admin.transaction_link(obj))
+        self.assertIn(
+            reverse('admin:main_transaction_detail', args=[self.transaction.pk]),
+            link,
+        )
 
 
 class ClientListAnnotationTestCase(TestCase):
