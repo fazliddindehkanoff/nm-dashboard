@@ -2,7 +2,7 @@ import re
 from decimal import Decimal
 
 from django import forms
-from django.db import models
+from django.db import models, transaction as db_transaction
 from django.contrib import admin, messages
 from django.contrib.auth.models import User, Permission
 from django.shortcuts import redirect
@@ -26,8 +26,8 @@ from unfold.widgets import (
 )
 
 from .models import (
-    Course, Group, Client, Operator, Discount, Transaction, TransactionClient, Teacher,
-    _recalc_transaction_participants,
+    Course, Group, Client, Operator, Discount, Transaction, TransactionClient, SubTransaction, Teacher,
+    _recalc_transaction_participants, sub_transaction_shares,
 )
 from .services.amocrm import (
     sync_contacts,
@@ -356,6 +356,9 @@ def grant_operator_permissions(user):
         'add_transactionclient', 'change_transactionclient', 'view_transactionclient', 'delete_transactionclient',
         'view_client', 'add_client', 'change_client',
         'view_group', 'view_course', 'view_discount',
+        # Operator o'zi qabul qilgan ichki to'lovning holatini ko'ra olishi kerak.
+        # Tasdiqlash/rad etish esa faqat superuser uchun (has_review_permission).
+        'view_subtransaction',
     ]
     perms = Permission.objects.filter(codename__in=codenames)
     user.user_permissions.add(*perms)
@@ -490,7 +493,114 @@ class TransactionClientInline(TabularInline):
         return ClientResolvingFormSet
 
 
+def _group_debt_for_clients(transaction, client_ids):
+    """Berilgan mijozlarning shu guruhdagi tasdiqlangan qarzi."""
+    if not transaction.group_id or not client_ids:
+        return Decimal(0)
+    return (
+        TransactionClient.objects.filter(
+            client_id__in=client_ids,
+            transaction__group_id=transaction.group_id,
+            transaction__is_confirmed=True,
+            transaction__is_refunded=False,
+        ).aggregate(total=models.Sum('debt'))['total']
+        or Decimal(0)
+    )
+
+
+def _sub_transaction_block_reason(sub_transaction):
+    """Ichki to'lovni tasdiqlab bo'lmasligining sababi (yoki None)."""
+    transaction = sub_transaction.transaction
+    if sub_transaction.status != SubTransaction.STATUS_PENDING:
+        return _("Bu ichki to'lov allaqachon ko'rib chiqilgan.")
+    if transaction.is_refunded:
+        return _("Qaytarilgan to'lovning ichki to'lovini tasdiqlab bo'lmaydi.")
+    if not transaction.is_confirmed:
+        return _("Avval asosiy to'lovni tasdiqlang.")
+    if sub_transaction.receipt_required and not sub_transaction.screenshot:
+        return _("Bu to'lov turida chek majburiy, lekin yuklanmagan.")
+
+    client_ids = list(sub_transaction.clients.values_list('pk', flat=True))
+    if not client_ids:
+        return _("Ichki to'lovga mijoz biriktirilmagan.")
+
+    # Tasdiqlash paytida faqat haqiqiy (tasdiqlangan to'lovlardan keyingi) qarz
+    # bilan solishtiriladi. Boshqa kutayotgan yozuvlar hali pul emas — ular
+    # navbat bilan tasdiqlanadi va qarz har safar qayta hisoblanadi, shuning
+    # uchun ortiqchasi o'z navbatida shu yerda bloklanadi.
+    debt = _group_debt_for_clients(transaction, client_ids)
+    if sub_transaction.amount > debt:
+        return _("Summa mijozlarning joriy qarzidan oshib ketdi (mumkin: %(available)s UZS).") % {
+            'available': debt,
+        }
+    return None
+
+
+def _review_sub_transaction(sub_transaction, user, approve, note=''):
+    """Ichki to'lovni tasdiqlaydi yoki rad etadi. `(ok, xabar)` qaytaradi.
+
+    Tasdiqlangandagina pul asosiy to'lov summasiga qo'shiladi va mijozlarning
+    qarzi qayta hisoblanadi.
+    """
+    with db_transaction.atomic():
+        locked = (
+            SubTransaction.objects.select_for_update()
+            .select_related('transaction')
+            .get(pk=sub_transaction.pk)
+        )
+        if locked.status != SubTransaction.STATUS_PENDING:
+            return False, _("Bu ichki to'lov allaqachon ko'rib chiqilgan.")
+
+        if approve:
+            block_reason = _sub_transaction_block_reason(locked)
+            if block_reason:
+                return False, block_reason
+
+        locked.status = (
+            SubTransaction.STATUS_APPROVED if approve else SubTransaction.STATUS_REJECTED
+        )
+        locked.reviewed_at = timezone.now()
+        locked.reviewed_by = user
+        locked.review_note = note or ''
+        locked.save(update_fields=['status', 'reviewed_at', 'reviewed_by', 'review_note'])
+
+        if approve:
+            transaction = locked.transaction
+            # Eski prefetch cache yangi statusni bilmaydi — qayta hisoblashdan
+            # oldin tozalanadi.
+            getattr(transaction, '_prefetched_objects_cache', {}).pop('sub_transactions', None)
+            transaction.amount = (transaction.amount or Decimal(0)) + locked.amount
+            transaction.save()
+
+    if approve:
+        return True, _("Ichki to'lov tasdiqlandi va mijoz qarzidan ayirildi.")
+    return True, _("Ichki to'lov rad etildi.")
+
+
+class SubTransactionReviewForm(forms.Form):
+    note = forms.CharField(
+        label=_("Izoh"),
+        required=False,
+        max_length=255,
+        widget=UnfoldAdminTextInputWidget(),
+        help_text=_("Ixtiyoriy. Rad etish sababini yozib qoldirish tavsiya etiladi."),
+    )
+
+
 class ReceivePaymentForm(forms.Form):
+    clients = forms.ModelMultipleChoiceField(
+        label=_("Mijozlar"),
+        queryset=Client.objects.none(),
+        widget=UnfoldAdminCheckboxSelectMultiple(),
+        help_text=_("Qo'shimcha to'lov qaysi mijozlar uchun qabul qilinayotganini tanlang."),
+    )
+    payment_method = forms.ChoiceField(
+        label=_("To'lov turi"),
+        choices=SubTransaction.METHODS,
+        initial=SubTransaction.METHOD_CASH,
+        widget=UnfoldAdminSelectWidget(attrs={'data-receipt-toggle': 'true'}),
+        help_text=_("Naqd pulda chek shart emas, qolgan turlarda chek majburiy."),
+    )
     amount = forms.DecimalField(
         label=_("Qo'shiladigan summa"),
         max_digits=12,
@@ -498,6 +608,32 @@ class ReceivePaymentForm(forms.Form):
         min_value=Decimal('0.01'),
         widget=UnfoldAdminDecimalFieldWidget(),
     )
+    screenshot = forms.ImageField(
+        label=_("Chek / skrinshot"),
+        required=False,
+        widget=UnfoldAdminImageFieldWidget(),
+        help_text=_("Naqd pul bo'lmasa, to'lov chekining rasmi majburiy."),
+    )
+
+    def __init__(self, *args, clients=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['clients'].queryset = clients if clients is not None else Client.objects.none()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        payment_method = cleaned_data.get('payment_method')
+        # Chek majburiyligini to'lov turi belgilaydi (naqd pul — istisno).
+        if (
+            payment_method
+            and SubTransaction.receipt_required_for(payment_method)
+            and not cleaned_data.get('screenshot')
+        ):
+            self.add_error(
+                'screenshot',
+                _("\"%(method)s\" to'lov turida chek yuklash majburiy.")
+                % {'method': dict(SubTransaction.METHODS).get(payment_method, payment_method)},
+            )
+        return cleaned_data
 
 
 @admin.register(Transaction)
@@ -518,6 +654,7 @@ class TransactionAdmin(ModelAdmin):
     date_hierarchy = 'date'
 
     list_before_template = "admin/main/transaction/month_filter_badges.html"
+    change_form_outer_after_template = "admin/main/transaction/subtransactions_table.html"
 
     def changelist_view(self, request, extra_context=None):
         extra_context = extra_context or {}
@@ -606,7 +743,12 @@ class TransactionAdmin(ModelAdmin):
         qs = super().get_queryset(request)
         if _is_plain_operator(request):
             qs = qs.filter(operator=request.user.operator)
-        return qs.annotate(total_debt=models.Sum('participants__debt'))
+        return qs.prefetch_related(
+            'participants__client',
+            'sub_transactions__clients',
+            'sub_transactions__received_by',
+            'sub_transactions__reviewed_by',
+        ).annotate(total_debt=models.Sum('participants__debt'))
 
     def save_model(self, request, obj, form, change):
         # Operator to'lov kiritsa, operator avtomatik o'ziga biriktiriladi.
@@ -696,9 +838,9 @@ class TransactionAdmin(ModelAdmin):
             kwargs['queryset'] = Group.objects.filter(is_active=True).select_related('course')
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-    # ---- Pul qabul qilish (faqat admin, mavjud to'lovga summa qo'shadi) ----
+    # ---- Pul qabul qilish (admin va operatorlar, mavjud to'lovga summa qo'shadi) ----
     def has_receive_payment_permission(self, request, obj=None):
-        return request.user.is_superuser
+        return request.user.is_superuser or _is_plain_operator(request)
 
     def _current_group_debt_for_participants(self, obj, participants):
         if not obj.group_id:
@@ -716,28 +858,63 @@ class TransactionAdmin(ModelAdmin):
             )
         return total
 
-    def _receive_payment_block_reason(self, obj, current_debt):
+    def _pending_shares(self, obj):
+        """Tasdiq kutayotgan ichki to'lovlarning mijozlar bo'yicha ulushi.
+
+        Bu pul hali qarzni kamaytirmagan, lekin bir xil summani ikki marta
+        qabul qilib yubormaslik uchun yangi qabulda band deb hisoblanadi.
+        """
+        return sub_transaction_shares(obj.pending_sub_transactions)
+
+    def _available_for_participants(self, obj, participants, pending_shares=None):
+        """Tanlangan mijozlardan hali qabul qilinishi mumkin bo'lgan summa."""
+        pending_shares = self._pending_shares(obj) if pending_shares is None else pending_shares
+        debt = self._current_group_debt_for_participants(obj, participants)
+        reserved = sum(
+            (pending_shares.get(participant.client_id, Decimal(0)) for participant in participants),
+            Decimal(0),
+        )
+        return max(debt - reserved, Decimal(0))
+
+    def _receive_payment_block_reason(self, obj, available):
         if obj.is_refunded:
             return _("Qaytarilgan to'lovga qo'shimcha pul qabul qilib bo'lmaydi.")
         if not obj.is_confirmed:
             return _("Avval to'lovni tasdiqlang, keyin qo'shimcha pul qabul qiling.")
-        if current_debt <= 0:
-            return _("Bu mijoz/guruh bo'yicha qarz yopilgan.")
+        if available <= 0:
+            return _("Bu mijoz/guruh bo'yicha qarz yopilgan yoki tasdiq kutayotgan to'lovlar bilan band.")
         return None
 
     def _receive_payment_summary(self, obj):
         participants = list(obj.participants.select_related('client').order_by('id'))
+        pending_shares = self._pending_shares(obj)
         current_debt = self._current_group_debt_for_participants(obj, participants)
-        block_reason = self._receive_payment_block_reason(obj, current_debt)
+        available = self._available_for_participants(obj, participants, pending_shares)
+        for participant in participants:
+            participant.current_group_debt = self._current_group_debt_for_participants(obj, [participant])
+            participant.pending_amount = pending_shares.get(participant.client_id, Decimal(0))
+            participant.available_amount = max(
+                participant.current_group_debt - participant.pending_amount, Decimal(0)
+            )
+        block_reason = self._receive_payment_block_reason(obj, available)
         return {
             'participants': participants,
             'clients_count': len(participants),
             'current_debt': current_debt,
+            'available_amount': available,
+            'pending_sub_total': obj.pending_sub_total,
+            'pending_sub_count': obj.pending_sub_count,
             'course_price': obj.course_price,
             'discount_total': obj.discount_total,
+            'initial_amount': obj.initial_amount,
             'receive_payment_block_reason': block_reason,
             'can_receive_payment': block_reason is None,
         }
+
+    def _receive_payment_form(self, obj, data=None, files=None):
+        clients = obj.clients.order_by('full_name', 'id')
+        initial = {'clients': list(clients.values_list('pk', flat=True))} if data is None else None
+        return ReceivePaymentForm(data=data, files=files, clients=clients, initial=initial)
 
     def _render_receive_payment(self, request, obj, form, summary=None):
         summary = summary or self._receive_payment_summary(obj)
@@ -764,10 +941,10 @@ class TransactionAdmin(ModelAdmin):
 
         summary = self._receive_payment_summary(obj)
         if request.method != 'POST':
-            form = ReceivePaymentForm()
+            form = self._receive_payment_form(obj)
             return self._render_receive_payment(request, obj, form, summary=summary)
 
-        form = ReceivePaymentForm(request.POST)
+        form = self._receive_payment_form(obj, data=request.POST, files=request.FILES)
         if not form.is_valid():
             return self._render_receive_payment(request, obj, form, summary=summary)
 
@@ -776,17 +953,43 @@ class TransactionAdmin(ModelAdmin):
             return self._render_receive_payment(request, obj, form, summary=summary)
 
         amount = form.cleaned_data['amount']
-        if amount > summary['current_debt']:
-            form.add_error(
-                'amount',
-                _("Qo'shiladigan summa joriy qarzdan oshmasligi kerak (%(debt)s UZS).")
-                % {'debt': summary['current_debt']},
-            )
-            return self._render_receive_payment(request, obj, form, summary=summary)
+        selected_clients = list(form.cleaned_data['clients'])
 
-        obj.amount = (obj.amount or Decimal(0)) + amount
-        obj.save()
-        self.message_user(request, _("Pul qabul qilindi."), level=messages.SUCCESS)
+        with db_transaction.atomic():
+            obj = self.get_queryset(request).select_for_update().get(pk=obj.pk)
+            locked_summary = self._receive_payment_summary(obj)
+            selected_ids = {client.pk for client in selected_clients}
+            selected_participants = [
+                participant for participant in locked_summary['participants']
+                if participant.client_id in selected_ids
+            ]
+            available = self._available_for_participants(obj, selected_participants)
+            if amount > available:
+                form.add_error(
+                    'amount',
+                    _("Qo'shiladigan summa tanlangan mijozlarning qolgan qarzidan oshmasligi kerak "
+                      "(%(available)s UZS — tasdiq kutayotgan to'lovlar hisobga olingan).")
+                    % {'available': available},
+                )
+                return self._render_receive_payment(request, obj, form, summary=locked_summary)
+
+            # Ichki to'lov tasdiq kutish holatida yaratiladi — admin tasdiqlamaguncha
+            # `transaction.amount` va mijoz qarzi o'zgarmaydi.
+            sub_transaction = SubTransaction.objects.create(
+                transaction=obj,
+                amount=amount,
+                payment_method=form.cleaned_data['payment_method'],
+                screenshot=form.cleaned_data.get('screenshot'),
+                received_by=request.user,
+                status=SubTransaction.STATUS_PENDING,
+            )
+            sub_transaction.clients.set(selected_clients)
+
+        self.message_user(
+            request,
+            _("Ichki to'lov qabul qilindi va admin tasdig'iga yuborildi."),
+            level=messages.SUCCESS,
+        )
         return redirect('admin:main_transaction_change', object_id)
 
     # ---- Ustunlar / ko'rinish ----
@@ -1023,3 +1226,192 @@ class TransactionAdmin(ModelAdmin):
     )
     def refund_transaction_detail(self, request, object_id):
         return self._refund_response(request, object_id, detail=True)
+
+
+@admin.register(SubTransaction)
+class SubTransactionAdmin(ModelAdmin):
+    """Ichki to'lovlar navbati — admin har birini alohida tasdiqlaydi."""
+
+    list_display = (
+        'transaction_link', 'clients_display', 'amount', 'payment_method_display',
+        'receipt_display', 'received_by_display', 'received_at', 'status_badge',
+    )
+    list_filter = ('status', 'payment_method', 'transaction__group', 'received_by')
+    search_fields = ('clients__full_name', 'transaction__id')
+    date_hierarchy = 'received_at'
+    ordering = ('-received_at', '-id')
+    actions_row = ('approve_sub_transaction', 'reject_sub_transaction')
+    actions_detail = ('approve_sub_transaction_detail', 'reject_sub_transaction_detail')
+
+    readonly_fields = (
+        'transaction', 'clients_display', 'amount', 'payment_method', 'receipt_preview',
+        'received_by', 'received_at', 'status', 'reviewed_by', 'reviewed_at', 'review_note',
+    )
+    fieldsets = (
+        (None, {
+            'fields': ('transaction', 'clients_display', 'amount', 'payment_method', 'receipt_preview'),
+        }),
+        (_("Qabul qilish"), {'fields': ('received_by', 'received_at')}),
+        (_("Ko'rib chiqish"), {'fields': ('status', 'reviewed_by', 'reviewed_at', 'review_note')}),
+    )
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related(
+            'transaction__group__course', 'received_by', 'reviewed_by',
+        ).prefetch_related('clients')
+        if _is_plain_operator(request):
+            qs = qs.filter(transaction__operator=request.user.operator)
+        return qs
+
+    # Ichki to'lovlar faqat "Pul qabul qilish" oqimi orqali yaratiladi va
+    # yaratilgach o'zgartirilmaydi — audit izi buzilmasligi uchun.
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_review_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    # ---- Ustunlar ----
+    @display(description=_("Asosiy to'lov"))
+    def transaction_link(self, obj):
+        return format_html(
+            '<a href="{}" class="text-primary-600 dark:text-primary-400 hover:underline">#{}</a>',
+            reverse('admin:main_transaction_change', args=[obj.transaction_id]),
+            obj.transaction_id,
+        )
+
+    @display(description=_("Mijozlar"))
+    def clients_display(self, obj):
+        names = [client.full_name for client in obj.clients.all()]
+        return ", ".join(names) if names else "—"
+
+    @display(description=_("To'lov turi"))
+    def payment_method_display(self, obj):
+        return obj.get_payment_method_display()
+
+    @display(description=_("Chek"))
+    def receipt_display(self, obj):
+        if obj.screenshot:
+            return format_html(
+                '<a href="{}" target="_blank" rel="noopener" class="text-primary-600 dark:text-primary-400 hover:underline">{}</a>',
+                obj.screenshot.url,
+                _("Ko'rish"),
+            )
+        return _("Naqd — shart emas") if not obj.receipt_required else _("Yuklanmagan")
+
+    @display(description=_("Chek"))
+    def receipt_preview(self, obj):
+        if obj.screenshot:
+            return format_html(
+                '<a href="{0}" target="_blank" rel="noopener">'
+                '<img src="{0}" style="max-height:220px;border-radius:8px;border:1px solid #e5e7eb;" />'
+                '</a>',
+                obj.screenshot.url,
+            )
+        return _("Chek yuklanmagan")
+
+    @display(description=_("Qabul qildi"))
+    def received_by_display(self, obj):
+        return obj.receiver_name
+
+    @display(
+        description=_("Holati"),
+        label={
+            _("Tasdiq kutilmoqda"): "warning",
+            _("Tasdiqlangan"): "success",
+            _("Rad etilgan"): "danger",
+        },
+    )
+    def status_badge(self, obj):
+        return obj.get_status_display()
+
+    # ---- Tasdiqlash / rad etish ----
+    def _review_cancel_url(self, request, object_id, detail=False):
+        fallback = (
+            reverse('admin:main_subtransaction_change', args=[object_id])
+            if detail else reverse('admin:main_subtransaction_changelist')
+        )
+        if url_has_allowed_host_and_scheme(
+            request.META.get('HTTP_REFERER') or '',
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            return request.META['HTTP_REFERER']
+        return fallback
+
+    def _review_response(self, request, object_id, approve, detail=False):
+        obj = self.get_object(request, object_id)
+        cancel_url = self._review_cancel_url(request, object_id, detail=detail)
+        if obj is None:
+            self.message_user(request, _("Ichki to'lov topilmadi."), level=messages.ERROR)
+            return redirect('admin:main_subtransaction_changelist')
+
+        if request.method != 'POST':
+            if obj.status != SubTransaction.STATUS_PENDING:
+                self.message_user(
+                    request, _("Bu ichki to'lov allaqachon ko'rib chiqilgan."), level=messages.WARNING,
+                )
+                return redirect(cancel_url)
+            context = {
+                **self.admin_site.each_context(request),
+                'title': _("Ichki to'lovni tasdiqlash") if approve else _("Ichki to'lovni rad etish"),
+                'object': obj,
+                'sub_transaction': obj,
+                'approve': approve,
+                'form': SubTransactionReviewForm(),
+                'block_reason': _sub_transaction_block_reason(obj) if approve else None,
+                'action_label': _("Tasdiqlash") if approve else _("Rad etish"),
+                'cancel_url': cancel_url,
+                'next_url': cancel_url,
+                'post_url': request.path,
+                'opts': self.model._meta,
+            }
+            return TemplateResponse(
+                request, "admin/main/subtransaction/review_confirm.html", context,
+            )
+
+        form = SubTransactionReviewForm(request.POST)
+        note = form.cleaned_data['note'] if form.is_valid() else ''
+        ok, message = _review_sub_transaction(obj, request.user, approve, note=note)
+        self.message_user(request, message, level=messages.SUCCESS if ok else messages.WARNING)
+
+        redirect_to = request.POST.get('next') or cancel_url
+        if not url_has_allowed_host_and_scheme(
+            redirect_to, allowed_hosts={request.get_host()}, require_https=request.is_secure(),
+        ):
+            redirect_to = cancel_url
+        return redirect(redirect_to)
+
+    @action(
+        description=_("Tasdiqlash"), url_path="approve-row",
+        permissions=["review"], variant=ActionVariant.SUCCESS,
+    )
+    def approve_sub_transaction(self, request, object_id):
+        return self._review_response(request, object_id, approve=True, detail=False)
+
+    @action(
+        description=_("Rad etish"), url_path="reject-row",
+        permissions=["review"], variant=ActionVariant.DANGER,
+    )
+    def reject_sub_transaction(self, request, object_id):
+        return self._review_response(request, object_id, approve=False, detail=False)
+
+    @action(
+        description=_("Tasdiqlash"), url_path="approve-detail",
+        permissions=["review"], variant=ActionVariant.SUCCESS,
+    )
+    def approve_sub_transaction_detail(self, request, object_id):
+        return self._review_response(request, object_id, approve=True, detail=True)
+
+    @action(
+        description=_("Rad etish"), url_path="reject-detail",
+        permissions=["review"], variant=ActionVariant.DANGER,
+    )
+    def reject_sub_transaction_detail(self, request, object_id):
+        return self._review_response(request, object_id, approve=False, detail=True)

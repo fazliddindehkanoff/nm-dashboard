@@ -1,0 +1,202 @@
+{% load i18n tz %}
+{% if original %}
+<div class="{% if not embedded %}mt-8{% endif %} flex flex-col gap-6">
+<section class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-800 rounded-default shadow-xs overflow-hidden" aria-labelledby="payment-clients-title">
+    <div class="px-4 sm:px-6 py-4 border-b border-base-200 dark:border-base-800">
+        <h2 id="payment-clients-title" class="font-semibold text-font-important-light dark:text-font-important-dark">
+            {% trans "To'lovchi mijozlar" %}
+        </h2>
+        <p class="text-xs text-base-500 mt-1 mb-0">{% trans "Kurs narxi mijozlar soniga ko'paytiriladi, chegirma esa ularga taqsimlanadi." %}</p>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border-b border-base-200 dark:border-base-800">
+        <div class="px-4 sm:px-6 py-4 border-b lg:border-b-0 lg:border-r border-base-200 dark:border-base-800">
+            <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Jami to'lanishi kerak" %}</p>
+            <p class="font-semibold text-lg tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ original.total_due|floatformat:0 }} UZS</p>
+        </div>
+        <div class="px-4 sm:px-6 py-4 border-b lg:border-b-0 lg:border-r border-base-200 dark:border-base-800">
+            <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Tasdiqlangan" %}</p>
+            <p class="font-semibold text-lg tabular-nums mb-0" style="color:#0f766e">{{ original.amount|floatformat:0 }} UZS</p>
+        </div>
+        <div class="px-4 sm:px-6 py-4 border-b sm:border-b-0 lg:border-r border-base-200 dark:border-base-800">
+            <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Tasdiq kutmoqda" %}</p>
+            <p class="font-semibold text-lg tabular-nums mb-0" style="color:{% if original.pending_sub_count %}#b45309{% else %}#9ca3af{% endif %}">
+                {{ original.pending_sub_total|floatformat:0 }} UZS
+            </p>
+        </div>
+        <div class="px-4 sm:px-6 py-4">
+            <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Qolgan qarz" %}</p>
+            <p class="font-semibold text-lg tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ original.total_remaining|floatformat:0 }} UZS</p>
+        </div>
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="w-full min-w-[680px] text-sm">
+            <thead class="bg-base-50 dark:bg-base-800 text-xs uppercase tracking-wider text-base-500">
+                <tr>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-left font-medium">{% trans "Mijoz" %}</th>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-right font-medium">{% trans "To'lanishi kerak" %}</th>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-right font-medium">{% trans "To'lagan" %}</th>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-right font-medium">{% trans "Qolgan" %}</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-base-200 dark:divide-base-800">
+                {% for participant in original.participants.all %}
+                <tr class="hover:bg-base-50 dark:hover:bg-base-800/60 transition-colors">
+                    <td class="px-4 sm:px-6 py-3 font-medium text-font-important-light dark:text-font-important-dark">{{ participant.client.full_name }}</td>
+                    <td class="px-4 sm:px-6 py-3 text-right whitespace-nowrap tabular-nums">{{ participant.amount_due|floatformat:0 }} UZS</td>
+                    <td class="px-4 sm:px-6 py-3 text-right whitespace-nowrap tabular-nums">{{ participant.share_amount|floatformat:0 }} UZS</td>
+                    <td class="px-4 sm:px-6 py-3 text-right whitespace-nowrap font-semibold tabular-nums">{{ participant.remaining_amount|floatformat:0 }} UZS</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="px-4 sm:px-6 py-6 text-center text-base-500">{% trans "To'lovchi mijozlar biriktirilmagan." %}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-800 rounded-default shadow-xs overflow-hidden" aria-labelledby="payment-history-title">
+    <div class="px-4 sm:px-6 py-4 border-b border-base-200 dark:border-base-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+            <h2 id="payment-history-title" class="font-semibold text-font-important-light dark:text-font-important-dark">
+                {% trans "Qabullar tarixi" %}
+            </h2>
+            <p class="text-xs text-base-500 mt-1 mb-0">{% trans "Asosiy to'lov va keyin qabul qilingan har bir ichki to'lov." %}</p>
+        </div>
+        {% if original.pending_sub_count %}
+        <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
+              style="background:rgba(180,83,9,.12);color:#b45309">
+            <span class="material-symbols-outlined text-[16px]" aria-hidden="true">hourglass_top</span>
+            {{ original.pending_sub_count }} {% trans "ta tasdiq kutmoqda" %}
+        </span>
+        {% endif %}
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="w-full min-w-[1040px] text-sm">
+            <thead class="bg-base-50 dark:bg-base-800 text-xs uppercase tracking-wider text-base-500">
+                <tr>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-left font-medium">#</th>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-left font-medium">{% trans "Sana va vaqt" %}</th>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-left font-medium">{% trans "Mijozlar" %}</th>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-left font-medium">{% trans "To'lov turi" %}</th>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-left font-medium">{% trans "Qabul qildi" %}</th>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-left font-medium">{% trans "Chek" %}</th>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-left font-medium">{% trans "Holati" %}</th>
+                    <th scope="col" class="px-4 sm:px-6 py-3 text-right font-medium">{% trans "Summa" %}</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-base-200 dark:divide-base-800">
+                <tr class="hover:bg-base-50 dark:hover:bg-base-800/60 transition-colors">
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap">
+                        <span class="inline-flex items-center rounded-full bg-base-100 dark:bg-base-800 px-2.5 py-1 text-xs font-medium text-base-700 dark:text-base-300">{% trans "Asosiy" %}</span>
+                    </td>
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap text-base-600 dark:text-base-300 tabular-nums">{{ original.date|date:"d.m.Y" }}</td>
+                    <td class="px-4 sm:px-6 py-3 text-font-important-light dark:text-font-important-dark">
+                        {% for client in original.clients.all %}{{ client.full_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+                    </td>
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap text-base-600 dark:text-base-300">{{ original.get_payment_type_display }}</td>
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap text-base-600 dark:text-base-300">{{ original.operator|default:"—" }}</td>
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap">
+                        {% if original.screenshot %}
+                        <a href="{{ original.screenshot.url }}" target="_blank" rel="noopener" class="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline focus:outline-none focus:ring-2 focus:ring-primary-500 rounded-default">
+                            <span class="material-symbols-outlined text-[18px]" aria-hidden="true">receipt_long</span>{% trans "Ko'rish" %}
+                        </a>
+                        {% else %}<span class="text-base-400">—</span>{% endif %}
+                    </td>
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap">
+                        {% if original.is_confirmed %}
+                        <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium" style="background:rgba(15,118,110,.12);color:#0f766e">
+                            <span class="material-symbols-outlined text-[15px]" aria-hidden="true">check_circle</span>{% trans "Tasdiqlangan" %}
+                        </span>
+                        {% else %}
+                        <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium" style="background:rgba(180,83,9,.12);color:#b45309">
+                            <span class="material-symbols-outlined text-[15px]" aria-hidden="true">hourglass_top</span>{% trans "Kutilmoqda" %}
+                        </span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 sm:px-6 py-3 text-right whitespace-nowrap font-semibold tabular-nums text-font-important-light dark:text-font-important-dark">{{ original.initial_amount|floatformat:0 }} UZS</td>
+                </tr>
+
+                {% for sub_transaction in original.sub_transactions.all %}
+                <tr class="hover:bg-base-50 dark:hover:bg-base-800/60 transition-colors{% if sub_transaction.status == 'rejected' %} opacity-60{% endif %}">
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap">
+                        <a href="{% url 'admin:main_subtransaction_change' sub_transaction.pk %}"
+                           class="inline-flex items-center rounded-full bg-base-100 dark:bg-base-800 px-2.5 py-1 text-xs font-medium text-base-700 dark:text-base-300 hover:underline">
+                            {% trans "Ichki" %} #{{ sub_transaction.pk }}
+                        </a>
+                    </td>
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap text-base-600 dark:text-base-300 tabular-nums">{% timezone "Asia/Tashkent" %}{{ sub_transaction.received_at|date:"d.m.Y H:i" }}{% endtimezone %}</td>
+                    <td class="px-4 sm:px-6 py-3 text-font-important-light dark:text-font-important-dark">
+                        {% for client in sub_transaction.clients.all %}{{ client.full_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+                    </td>
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap text-base-600 dark:text-base-300">{{ sub_transaction.get_payment_method_display }}</td>
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap text-base-600 dark:text-base-300">{{ sub_transaction.receiver_name }}</td>
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap">
+                        {% if sub_transaction.screenshot %}
+                        <a href="{{ sub_transaction.screenshot.url }}" target="_blank" rel="noopener" class="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline focus:outline-none focus:ring-2 focus:ring-primary-500 rounded-default">
+                            <span class="material-symbols-outlined text-[18px]" aria-hidden="true">receipt_long</span>{% trans "Ko'rish" %}
+                        </a>
+                        {% elif sub_transaction.receipt_required %}
+                        <span class="text-xs font-medium" style="color:#b91c1c">{% trans "Yuklanmagan" %}</span>
+                        {% else %}
+                        <span class="text-base-400 text-xs">{% trans "Naqd — shart emas" %}</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 sm:px-6 py-3 whitespace-nowrap">
+                        {% if sub_transaction.status == 'approved' %}
+                        <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium" style="background:rgba(15,118,110,.12);color:#0f766e">
+                            <span class="material-symbols-outlined text-[15px]" aria-hidden="true">check_circle</span>{% trans "Tasdiqlangan" %}
+                        </span>
+                        {% elif sub_transaction.status == 'rejected' %}
+                        <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium" style="background:rgba(220,38,38,.12);color:#b91c1c">
+                            <span class="material-symbols-outlined text-[15px]" aria-hidden="true">block</span>{% trans "Rad etilgan" %}
+                        </span>
+                        {% else %}
+                        <div class="flex items-center gap-2">
+                            <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium" style="background:rgba(180,83,9,.12);color:#b45309">
+                                <span class="material-symbols-outlined text-[15px]" aria-hidden="true">hourglass_top</span>{% trans "Kutilmoqda" %}
+                            </span>
+                            {% if request.user.is_superuser %}
+                            <a href="{% url 'admin:main_subtransaction_approve_sub_transaction' sub_transaction.pk %}"
+                               aria-label="{% trans 'Ichki to\'lovni tasdiqlash' %}" title="{% trans 'Tasdiqlash' %}"
+                               class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-default text-white transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
+                               style="background:#0f766e;height:2rem;width:2rem;min-height:2rem;min-width:2rem">
+                                <span class="material-symbols-outlined text-[18px]" aria-hidden="true">check</span>
+                            </a>
+                            <a href="{% url 'admin:main_subtransaction_reject_sub_transaction' sub_transaction.pk %}"
+                               aria-label="{% trans 'Ichki to\'lovni rad etish' %}" title="{% trans 'Rad etish' %}"
+                               class="inline-flex items-center justify-center rounded-default text-white transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
+                               style="background:#dc2626;height:2rem;width:2rem">
+                                <span class="material-symbols-outlined text-[18px]" aria-hidden="true">close</span>
+                            </a>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 sm:px-6 py-3 text-right whitespace-nowrap font-semibold tabular-nums {% if sub_transaction.status == 'approved' %}text-font-important-light dark:text-font-important-dark{% else %}text-base-500{% endif %}">
+                        +{{ sub_transaction.amount|floatformat:0 }} UZS
+                    </td>
+                </tr>
+                {% if sub_transaction.review_note %}
+                <tr class="border-0">
+                    <td colspan="8" class="px-4 sm:px-6 pb-3 pt-0 text-xs text-base-500">
+                        <span class="material-symbols-outlined text-[14px] align-middle" aria-hidden="true">chat</span>
+                        {{ sub_transaction.reviewer_name }}: {{ sub_transaction.review_note }}
+                    </td>
+                </tr>
+                {% endif %}
+                {% empty %}
+                <tr>
+                    <td colspan="8" class="px-4 sm:px-6 py-6 text-center text-sm text-base-500">
+                        {% trans "Hali ichki to'lov qabul qilinmagan." %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+</div>
+{% endif %}

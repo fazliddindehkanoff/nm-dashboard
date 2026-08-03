@@ -4,8 +4,9 @@ from unittest import mock
 from django.test import TestCase, RequestFactory, override_settings
 from django.contrib.auth.models import User
 from django.contrib.messages.storage.fallback import FallbackStorage
+from django.core.files.uploadedfile import SimpleUploadedFile
 from main.models import (
-    Operator, Transaction, TransactionClient, Client, Course, Group,
+    Operator, Transaction, TransactionClient, SubTransaction, Client, Course, Group,
     _split_amount, _recalc_transaction_participants,
 )
 from main.admin import (
@@ -33,6 +34,27 @@ def _post_request_with_messages(user, path, data):
     setattr(request, 'session', {})
     setattr(request, '_messages', FallbackStorage(request))
     return request
+
+
+def _receipt():
+    """ImageField validatsiyasidan o'tadigan 1x1 GIF test cheki."""
+    return SimpleUploadedFile(
+        'receipt.gif',
+        b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;',
+        content_type='image/gif',
+    )
+
+
+def _approve_pending_sub_transactions(user, transaction):
+    """Kutayotgan barcha ichki to'lovlarni tasdiqlaydi (test yordamchisi)."""
+    from main.admin import _review_sub_transaction
+
+    results = []
+    for sub_transaction in transaction.sub_transactions.filter(
+        status=SubTransaction.STATUS_PENDING
+    ).order_by('id'):
+        results.append(_review_sub_transaction(sub_transaction, user, approve=True))
+    return results
 
 
 def _create_transaction_with_clients(clients, **kwargs):
@@ -802,7 +824,7 @@ class TransactionInlineClientTestCase(TestCase):
 
 
 class ReceivePaymentTestCase(TestCase):
-    """Tranzaksiya detail sahifasidagi 'Pul qabul qilish' (faqat admin)."""
+    """Tranzaksiya detail sahifasidagi 'Pul qabul qilish'."""
 
     def setUp(self):
         from django.contrib.admin.sites import AdminSite
@@ -820,22 +842,31 @@ class ReceivePaymentTestCase(TestCase):
             self.client_obj, group=self.group, amount=100000, payment_type='naqd',
         )
         request = _post_request_with_messages(
-            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/', {'amount': '200000'},
+            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {'amount': '200000', 'clients': [self.client_obj.pk], 'payment_method': 'naqd', 'screenshot': _receipt()},
         )
         self.admin.receive_payment_detail(request, str(tx.pk))
+        _approve_pending_sub_transactions(self.superuser, tx)
         tx.refresh_from_db()
         self.assertEqual(tx.amount, Decimal('300000'))
         tc = TransactionClient.objects.get(transaction=tx, client=self.client_obj)
         self.assertEqual(tc.debt, Decimal('700000'))
 
         request2 = _post_request_with_messages(
-            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/', {'amount': '700000'},
+            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {'amount': '700000', 'clients': [self.client_obj.pk], 'payment_method': 'naqd', 'screenshot': _receipt()},
         )
         self.admin.receive_payment_detail(request2, str(tx.pk))
+        _approve_pending_sub_transactions(self.superuser, tx)
         tx.refresh_from_db()
         self.assertEqual(tx.amount, Decimal('1000000'))
         tc.refresh_from_db()
         self.assertEqual(tc.debt, Decimal('0'))
+        self.assertEqual(tx.sub_transactions.count(), 2)
+        self.assertEqual(
+            list(tx.sub_transactions.order_by('received_at').values_list('amount', flat=True)),
+            [Decimal('200000'), Decimal('700000')],
+        )
 
     def test_accumulates_and_splits_across_two_clients(self):
         client_b = Client.objects.create(full_name='B', phone_number='+998902222222')
@@ -843,14 +874,33 @@ class ReceivePaymentTestCase(TestCase):
             [self.client_obj, client_b], group=self.group, amount=200000, payment_type='naqd',
         )
         request = _post_request_with_messages(
-            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/', {'amount': '800000'},
+            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {'amount': '800000', 'clients': [self.client_obj.pk, client_b.pk], 'payment_method': 'naqd', 'screenshot': _receipt()},
         )
         self.admin.receive_payment_detail(request, str(tx.pk))
+        _approve_pending_sub_transactions(self.superuser, tx)
         tx.refresh_from_db()
         self.assertEqual(tx.amount, Decimal('1000000'))
         for tc in TransactionClient.objects.filter(transaction=tx):
             self.assertEqual(tc.share_amount, Decimal('500000.00'))
             self.assertEqual(tc.debt, Decimal('500000'))
+
+    def test_total_due_and_remaining_scale_with_participant_count(self):
+        client_b = Client.objects.create(full_name='B', phone_number='+998902222222')
+        tx = _create_transaction_with_clients(
+            [self.client_obj, client_b],
+            group=self.group,
+            amount=Decimal('200000'),
+            payment_type='naqd',
+            is_confirmed=False,
+        )
+
+        self.assertEqual(tx.total_due, Decimal('2000000'))
+        self.assertEqual(tx.total_remaining, Decimal('1800000'))
+        for participant in tx.participants.all():
+            self.assertEqual(participant.amount_due, Decimal('1000000'))
+            self.assertEqual(participant.share_amount, Decimal('100000'))
+            self.assertEqual(participant.remaining_amount, Decimal('900000'))
 
     def test_get_request_shows_form_without_changes(self):
         tx = _create_transaction_with_clients(
@@ -865,13 +915,151 @@ class ReceivePaymentTestCase(TestCase):
         tx.refresh_from_db()
         self.assertEqual(tx.amount, Decimal('100000'))
 
-    def test_superuser_only_permission(self):
+    def test_superuser_and_operator_have_permission(self):
         class DummyRequest:
             def __init__(self, user):
                 self.user = user
 
         self.assertTrue(self.admin.has_receive_payment_permission(DummyRequest(self.superuser)))
-        self.assertFalse(self.admin.has_receive_payment_permission(DummyRequest(self.op_user)))
+        self.assertTrue(self.admin.has_receive_payment_permission(DummyRequest(self.op_user)))
+
+    def test_operator_can_receive_payment_for_own_transaction(self):
+        tx = _create_transaction_with_clients(
+            self.client_obj,
+            operator=self.op_user.operator,
+            group=self.group,
+            amount=Decimal('100000'),
+            payment_type='naqd',
+        )
+        request = _post_request_with_messages(
+            self.op_user,
+            f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {'amount': '200000', 'clients': [self.client_obj.pk], 'payment_method': 'naqd', 'screenshot': _receipt()},
+        )
+
+        response = self.admin.receive_payment_detail(request, str(tx.pk))
+
+        self.assertEqual(response.status_code, 302)
+        tx.refresh_from_db()
+        # Operator qabul qildi, lekin admin tasdiqlamaguncha summa o'zgarmaydi.
+        self.assertEqual(tx.amount, Decimal('100000'))
+        sub_transaction = SubTransaction.objects.get(transaction=tx)
+        self.assertEqual(sub_transaction.status, SubTransaction.STATUS_PENDING)
+        self.assertEqual(sub_transaction.received_by, self.op_user)
+        self.assertEqual(list(sub_transaction.clients.all()), [self.client_obj])
+        self.assertTrue(sub_transaction.screenshot.name.startswith('subtransaction_receipts/'))
+        self.assertTrue(sub_transaction.screenshot.name.endswith('.gif'))
+
+        _approve_pending_sub_transactions(self.superuser, tx)
+        tx.refresh_from_db()
+        self.assertEqual(tx.amount, Decimal('300000'))
+
+    def test_operator_cannot_receive_payment_for_another_operators_transaction(self):
+        other_op_user = User.objects.create_user(
+            username='+998900000008', password='x', is_staff=True,
+        )
+        grant_operator_permissions(other_op_user)
+        other_operator = Operator.objects.create(
+            user=other_op_user, full_name='Boshqa Op', phone_number='+998900000008',
+        )
+        tx = _create_transaction_with_clients(
+            self.client_obj,
+            operator=other_operator,
+            group=self.group,
+            amount=Decimal('100000'),
+            payment_type='naqd',
+        )
+        request = _post_request_with_messages(
+            self.op_user,
+            f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {
+                'amount': '200000', 'clients': [self.client_obj.pk],
+                'payment_method': 'naqd', 'screenshot': _receipt(),
+            },
+        )
+
+        response = self.admin.receive_payment_detail(request, str(tx.pk))
+
+        # Boshqa operatorning to'lovi umuman ko'rinmaydi — pul qabul qilinmaydi.
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(SubTransaction.objects.filter(transaction=tx).exists())
+        tx.refresh_from_db()
+        self.assertEqual(tx.amount, Decimal('100000'))
+
+    def test_operator_can_receive_payment_for_confirmed_own_transaction(self):
+        """Tasdiqlangan to'lovni operator tahrirlay olmaydi, lekin pul qabul qila oladi."""
+        tx = _create_transaction_with_clients(
+            self.client_obj,
+            operator=self.op_user.operator,
+            group=self.group,
+            amount=Decimal('100000'),
+            payment_type='naqd',
+        )
+
+        class DummyRequest:
+            def __init__(self, user):
+                self.user = user
+
+        request = DummyRequest(self.op_user)
+        self.assertTrue(tx.is_confirmed)
+        self.assertFalse(self.admin.has_change_permission(request, tx))
+        self.assertTrue(self.admin.has_receive_payment_permission(request, tx))
+
+        post = _post_request_with_messages(
+            self.op_user,
+            f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {
+                'amount': '200000', 'clients': [self.client_obj.pk],
+                'payment_method': 'naqd', 'screenshot': _receipt(),
+            },
+        )
+        response = self.admin.receive_payment_detail(post, str(tx.pk))
+
+        self.assertEqual(response.status_code, 302)
+        sub_transaction = SubTransaction.objects.get(transaction=tx)
+        self.assertEqual(sub_transaction.received_by, self.op_user)
+        self.assertEqual(sub_transaction.status, SubTransaction.STATUS_PENDING)
+
+    def test_selected_clients_receive_only_their_sub_transaction_share(self):
+        client_b = Client.objects.create(full_name='B', phone_number='+998902222222')
+        tx = _create_transaction_with_clients(
+            [self.client_obj, client_b], group=self.group, amount=Decimal('200000'), payment_type='naqd',
+        )
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {'amount': '300000', 'clients': [self.client_obj.pk], 'payment_method': 'naqd', 'screenshot': _receipt()},
+        )
+
+        response = self.admin.receive_payment_detail(request, str(tx.pk))
+        _approve_pending_sub_transactions(self.superuser, tx)
+
+        self.assertEqual(response.status_code, 302)
+        shares = {
+            row.client_id: row.share_amount
+            for row in TransactionClient.objects.filter(transaction=tx)
+        }
+        self.assertEqual(shares[self.client_obj.pk], Decimal('400000'))
+        self.assertEqual(shares[client_b.pk], Decimal('100000'))
+        sub_transaction = SubTransaction.objects.get(transaction=tx)
+        self.assertEqual(list(sub_transaction.clients.all()), [self.client_obj])
+
+    def test_receive_payment_requires_at_least_one_client(self):
+        tx = _create_transaction_with_clients(
+            self.client_obj, group=self.group, amount=Decimal('100000'), payment_type='naqd',
+        )
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {'amount': '100000'},
+        )
+
+        response = self.admin.receive_payment_detail(request, str(tx.pk))
+        response.render()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('clients', response.context_data['form'].errors)
+        self.assertFalse(SubTransaction.objects.filter(transaction=tx).exists())
 
     def test_get_request_includes_payment_impact_summary(self):
         tx = _create_transaction_with_clients(
@@ -888,6 +1076,25 @@ class ReceivePaymentTestCase(TestCase):
         self.assertEqual(response.context_data['clients_count'], 1)
         self.assertTrue(response.context_data['can_receive_payment'])
 
+    def test_transaction_change_page_shows_sub_transaction_history_table(self):
+        tx = _create_transaction_with_clients(
+            self.client_obj, group=self.group, amount=Decimal('100000'), payment_type='naqd',
+        )
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {'amount': '200000', 'clients': [self.client_obj.pk], 'payment_method': 'naqd', 'screenshot': _receipt()},
+        )
+        self.admin.receive_payment_detail(request, str(tx.pk))
+        self.client.force_login(self.superuser)
+
+        response = self.client.get(f'/admin/main/transaction/{tx.pk}/change/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Qabullar tarixi")
+        self.assertContains(response, 'Ichki #')
+        self.assertContains(response, '200000 UZS')
+
     def test_receive_payment_blocks_refunded_transaction(self):
         tx = _create_transaction_with_clients(
             self.client_obj, group=self.group, amount=100000, payment_type='naqd',
@@ -895,7 +1102,8 @@ class ReceivePaymentTestCase(TestCase):
         tx.is_refunded = True
         tx.save(update_fields=['is_refunded'])
         request = _post_request_with_messages(
-            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/', {'amount': '100000'},
+            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {'amount': '100000', 'clients': [self.client_obj.pk], 'payment_method': 'naqd', 'screenshot': _receipt()},
         )
         response = self.admin.receive_payment_detail(request, str(tx.pk))
         response.render()
@@ -910,7 +1118,8 @@ class ReceivePaymentTestCase(TestCase):
             is_confirmed=False,
         )
         request = _post_request_with_messages(
-            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/', {'amount': '100000'},
+            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {'amount': '100000', 'clients': [self.client_obj.pk], 'payment_method': 'naqd', 'screenshot': _receipt()},
         )
         response = self.admin.receive_payment_detail(request, str(tx.pk))
         response.render()
@@ -924,7 +1133,8 @@ class ReceivePaymentTestCase(TestCase):
             self.client_obj, group=self.group, amount=900000, payment_type='naqd',
         )
         request = _post_request_with_messages(
-            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/', {'amount': '100001'},
+            self.superuser, f'/admin/main/transaction/{tx.pk}/receive-payment/',
+            {'amount': '100001', 'clients': [self.client_obj.pk], 'payment_method': 'naqd', 'screenshot': _receipt()},
         )
         response = self.admin.receive_payment_detail(request, str(tx.pk))
         response.render()
@@ -945,6 +1155,245 @@ class ReceivePaymentTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context_data['current_debt'], 0)
         self.assertFalse(response.context_data['can_receive_payment'])
+
+
+class SubTransactionReceiptRuleTestCase(TestCase):
+    """Chek majburiyligi to'lov turiga bog'liq: naqd pulda shart emas."""
+
+    def setUp(self):
+        from django.contrib.admin.sites import AdminSite
+        self.admin = TransactionAdmin(Transaction, AdminSite())
+        self.superuser = User.objects.create_superuser(username='admin-receipt', password='x')
+        self.course = Course.objects.create(name='C', price=1000000)
+        self.group = Group.objects.create(course=self.course, start_date=date.today(), is_active=True)
+        self.client_obj = Client.objects.create(full_name='A', phone_number='+998901111133')
+        self.tx = _create_transaction_with_clients(
+            self.client_obj, group=self.group, amount=Decimal('100000'), payment_type='naqd',
+        )
+
+    def _post(self, data):
+        request = _post_request_with_messages(
+            self.superuser, f'/admin/main/transaction/{self.tx.pk}/receive-payment/', data,
+        )
+        return self.admin.receive_payment_detail(request, str(self.tx.pk))
+
+    def test_cash_payment_accepted_without_receipt(self):
+        response = self._post({
+            'amount': '200000', 'clients': [self.client_obj.pk], 'payment_method': 'naqd',
+        })
+
+        self.assertEqual(response.status_code, 302)
+        sub_transaction = SubTransaction.objects.get(transaction=self.tx)
+        self.assertEqual(sub_transaction.payment_method, 'naqd')
+        self.assertFalse(sub_transaction.screenshot)
+        self.assertFalse(sub_transaction.receipt_required)
+
+    def test_card_payment_rejected_without_receipt(self):
+        response = self._post({
+            'amount': '200000', 'clients': [self.client_obj.pk], 'payment_method': 'karta',
+        })
+        response.render()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('screenshot', response.context_data['form'].errors)
+        self.assertFalse(SubTransaction.objects.filter(transaction=self.tx).exists())
+
+    def test_card_payment_accepted_with_receipt(self):
+        response = self._post({
+            'amount': '200000', 'clients': [self.client_obj.pk],
+            'payment_method': 'karta', 'screenshot': _receipt(),
+        })
+
+        self.assertEqual(response.status_code, 302)
+        sub_transaction = SubTransaction.objects.get(transaction=self.tx)
+        self.assertEqual(sub_transaction.payment_method, 'karta')
+        self.assertTrue(sub_transaction.screenshot)
+
+    def test_model_clean_enforces_receipt_for_non_cash(self):
+        from django.core.exceptions import ValidationError
+
+        sub_transaction = SubTransaction(
+            transaction=self.tx, amount=Decimal('1000'), payment_method='bank',
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            sub_transaction.clean()
+        self.assertIn('screenshot', ctx.exception.message_dict)
+
+        sub_transaction.payment_method = 'naqd'
+        sub_transaction.clean()  # naqd pulda xatolik bo'lmasligi kerak
+
+
+class SubTransactionApprovalTestCase(TestCase):
+    """Har bir ichki to'lov admin tasdig'idan keyingina qarzga ta'sir qiladi."""
+
+    def setUp(self):
+        from django.contrib.admin.sites import AdminSite
+        self.admin = TransactionAdmin(Transaction, AdminSite())
+        self.superuser = User.objects.create_superuser(username='admin-approve', password='x')
+        self.course = Course.objects.create(name='C', price=1000000)
+        self.group = Group.objects.create(course=self.course, start_date=date.today(), is_active=True)
+        self.client_obj = Client.objects.create(full_name='A', phone_number='+998901111144')
+        self.tx = _create_transaction_with_clients(
+            self.client_obj, group=self.group, amount=Decimal('100000'), payment_type='naqd',
+        )
+
+    def _receive(self, amount='200000', clients=None):
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{self.tx.pk}/receive-payment/',
+            {
+                'amount': amount,
+                'clients': clients or [self.client_obj.pk],
+                'payment_method': 'naqd',
+            },
+        )
+        self.admin.receive_payment_detail(request, str(self.tx.pk))
+        return SubTransaction.objects.filter(transaction=self.tx).order_by('-id').first()
+
+    def test_pending_sub_transaction_does_not_change_debt(self):
+        sub_transaction = self._receive()
+
+        self.tx.refresh_from_db()
+        tc = TransactionClient.objects.get(transaction=self.tx, client=self.client_obj)
+        self.assertEqual(sub_transaction.status, SubTransaction.STATUS_PENDING)
+        self.assertEqual(self.tx.amount, Decimal('100000'))
+        self.assertEqual(tc.share_amount, Decimal('100000'))
+        self.assertEqual(tc.debt, Decimal('900000'))
+
+    def test_approval_applies_amount_and_reduces_debt(self):
+        from main.admin import _review_sub_transaction
+
+        sub_transaction = self._receive()
+        ok, _message = _review_sub_transaction(sub_transaction, self.superuser, approve=True)
+
+        self.assertTrue(ok)
+        sub_transaction.refresh_from_db()
+        self.tx.refresh_from_db()
+        tc = TransactionClient.objects.get(transaction=self.tx, client=self.client_obj)
+        self.assertEqual(sub_transaction.status, SubTransaction.STATUS_APPROVED)
+        self.assertEqual(sub_transaction.reviewed_by, self.superuser)
+        self.assertIsNotNone(sub_transaction.reviewed_at)
+        self.assertEqual(self.tx.amount, Decimal('300000'))
+        self.assertEqual(tc.share_amount, Decimal('300000'))
+        self.assertEqual(tc.debt, Decimal('700000'))
+
+    def test_rejection_leaves_debt_untouched(self):
+        from main.admin import _review_sub_transaction
+
+        sub_transaction = self._receive()
+        ok, _message = _review_sub_transaction(
+            sub_transaction, self.superuser, approve=False, note='Chek soxta',
+        )
+
+        self.assertTrue(ok)
+        sub_transaction.refresh_from_db()
+        self.tx.refresh_from_db()
+        tc = TransactionClient.objects.get(transaction=self.tx, client=self.client_obj)
+        self.assertEqual(sub_transaction.status, SubTransaction.STATUS_REJECTED)
+        self.assertEqual(sub_transaction.review_note, 'Chek soxta')
+        self.assertEqual(self.tx.amount, Decimal('100000'))
+        self.assertEqual(tc.debt, Decimal('900000'))
+
+    def test_sub_transaction_cannot_be_reviewed_twice(self):
+        from main.admin import _review_sub_transaction
+
+        sub_transaction = self._receive()
+        _review_sub_transaction(sub_transaction, self.superuser, approve=True)
+        ok, _message = _review_sub_transaction(sub_transaction, self.superuser, approve=True)
+
+        self.assertFalse(ok)
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.amount, Decimal('300000'))
+
+    def test_pending_amount_is_reserved_against_further_receipts(self):
+        self._receive(amount='900000')
+
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{self.tx.pk}/receive-payment/',
+            {'amount': '1', 'clients': [self.client_obj.pk], 'payment_method': 'naqd'},
+        )
+        response = self.admin.receive_payment_detail(request, str(self.tx.pk))
+        response.render()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context_data['can_receive_payment'])
+        self.assertEqual(response.context_data['available_amount'], Decimal('0'))
+        self.assertEqual(response.context_data['pending_sub_total'], Decimal('900000'))
+        self.assertEqual(SubTransaction.objects.filter(transaction=self.tx).count(), 1)
+
+    def test_approval_blocked_when_debt_no_longer_covers_amount(self):
+        from main.admin import _review_sub_transaction
+
+        first = self._receive(amount='900000')
+        second = self._receive(amount='900000')
+        # Ikkinchisini yaratish uchun band summani chetlab o'tamiz — real oqimda
+        # bunga yo'l qo'yilmaydi, lekin tasdiqlash bosqichi ham himoyalangan.
+        if second is None or second.pk == first.pk:
+            second = SubTransaction.objects.create(
+                transaction=self.tx, amount=Decimal('900000'), payment_method='naqd',
+                received_by=self.superuser,
+            )
+            second.clients.set([self.client_obj])
+
+        self.assertTrue(_review_sub_transaction(first, self.superuser, approve=True)[0])
+        ok, message = _review_sub_transaction(second, self.superuser, approve=True)
+
+        self.assertFalse(ok)
+        self.assertIn('qarzidan oshib', str(message))
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.amount, Decimal('1000000'))
+
+    def test_approval_blocked_when_required_receipt_missing(self):
+        from main.admin import _review_sub_transaction
+
+        sub_transaction = SubTransaction.objects.create(
+            transaction=self.tx, amount=Decimal('100000'), payment_method='karta',
+            received_by=self.superuser,
+        )
+        sub_transaction.clients.set([self.client_obj])
+
+        ok, message = _review_sub_transaction(sub_transaction, self.superuser, approve=True)
+
+        self.assertFalse(ok)
+        self.assertIn('chek majburiy', str(message).lower())
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.amount, Decimal('100000'))
+
+    def test_only_superuser_may_review(self):
+        from django.contrib.admin.sites import AdminSite
+        from main.admin import SubTransactionAdmin
+
+        op_user = User.objects.create_user(username='+998900000077', password='x', is_staff=True)
+        grant_operator_permissions(op_user)
+        Operator.objects.create(user=op_user, full_name='Op', phone_number='+998900000077')
+        sub_admin = SubTransactionAdmin(SubTransaction, AdminSite())
+
+        class DummyRequest:
+            def __init__(self, user):
+                self.user = user
+
+        self.assertTrue(sub_admin.has_review_permission(DummyRequest(self.superuser)))
+        self.assertFalse(sub_admin.has_review_permission(DummyRequest(op_user)))
+
+    def test_review_get_is_preview_only(self):
+        from django.contrib.admin.sites import AdminSite
+        from main.admin import SubTransactionAdmin
+
+        sub_transaction = self._receive()
+        sub_admin = SubTransactionAdmin(SubTransaction, AdminSite())
+        request = _request_with_messages(
+            self.superuser, f'/admin/main/subtransaction/{sub_transaction.pk}/approve-row/',
+        )
+
+        response = sub_admin.approve_sub_transaction(request, str(sub_transaction.pk))
+        response.render()
+
+        self.assertEqual(response.status_code, 200)
+        sub_transaction.refresh_from_db()
+        self.assertEqual(sub_transaction.status, SubTransaction.STATUS_PENDING)
+        self.tx.refresh_from_db()
+        self.assertEqual(self.tx.amount, Decimal('100000'))
 
 
 class ConfirmRefundPreviewTestCase(TestCase):

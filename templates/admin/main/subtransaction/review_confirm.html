@@ -1,0 +1,126 @@
+{% extends 'unfold/layouts/base.html' %}
+{% load i18n tz unfold %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block title %}
+    {{ title }} | {{ site_title|default:_('Django site admin') }}
+{% endblock %}
+
+{% block content %}
+<div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-6 max-w-3xl">
+    <div class="flex flex-col gap-1">
+        <a href="{{ cancel_url }}" aria-label="Orqaga qaytish" title="Orqaga qaytish" class="text-sm text-base-500 hover:text-base-700 dark:hover:text-base-300 flex items-center gap-1 mb-1">
+            <span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>
+            {% trans "Orqaga" %}
+        </a>
+        <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark">
+            {{ title }}
+        </div>
+        <p class="text-sm text-base-500">
+            {% if approve %}
+            {% trans "Tasdiqlangandan keyin summa asosiy to'lovga qo'shiladi va mijozlarning qarzi qayta hisoblanadi." %}
+            {% else %}
+            {% trans "Rad etilgan ichki to'lov qarzga umuman ta'sir qilmaydi, lekin tarixda saqlanib qoladi." %}
+            {% endif %}
+        </p>
+    </div>
+
+    <div class="bg-white overflow-hidden rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
+        <div class="border-b border-base-200 dark:border-base-800 p-5 flex items-start gap-3">
+            <span class="material-symbols-outlined {% if approve %}text-primary-600 dark:text-primary-400{% else %}text-base-500{% endif %}" aria-hidden="true">
+                {% if approve %}verified{% else %}block{% endif %}
+            </span>
+            <h2 class="font-semibold text-[15px] text-font-important-light dark:text-font-important-dark mb-0">
+                {% trans "Ichki to'lov" %} #{{ sub_transaction.pk }}
+            </h2>
+        </div>
+
+        {% if block_reason %}
+        <div class="border-b border-base-200 dark:border-base-800 px-5 py-4 flex items-start gap-3"
+             style="background:rgba(220,38,38,.08)" role="alert">
+            <span class="material-symbols-outlined text-[20px]" style="color:#dc2626" aria-hidden="true">error</span>
+            <p class="text-sm mb-0" style="color:#b91c1c">{{ block_reason }}</p>
+        </div>
+        {% endif %}
+
+        <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+            <div>
+                <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Mijozlar" %}</p>
+                <p class="font-medium text-font-important-light dark:text-font-important-dark mb-0">
+                    {% for c in sub_transaction.clients.all %}{{ c.full_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+                </p>
+            </div>
+            <div>
+                <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Guruh / kurs" %}</p>
+                <p class="font-medium text-font-important-light dark:text-font-important-dark mb-0">{{ sub_transaction.transaction.group|default:"—" }}</p>
+            </div>
+            <div>
+                <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Summa" %}</p>
+                <p class="font-semibold text-lg tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ sub_transaction.amount|floatformat:0 }} UZS</p>
+            </div>
+            <div>
+                <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "To'lov turi" %}</p>
+                <p class="font-medium text-font-important-light dark:text-font-important-dark mb-0">{{ sub_transaction.get_payment_method_display }}</p>
+            </div>
+            <div>
+                <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Qabul qildi" %}</p>
+                <p class="font-medium text-font-important-light dark:text-font-important-dark mb-0">{{ sub_transaction.receiver_name }}</p>
+            </div>
+            <div>
+                <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Qabul qilingan vaqt" %}</p>
+                <p class="font-medium tabular-nums text-font-important-light dark:text-font-important-dark mb-0">
+                    {% timezone "Asia/Tashkent" %}{{ sub_transaction.received_at|date:"d.m.Y H:i" }}{% endtimezone %}
+                </p>
+            </div>
+        </div>
+
+        <div class="border-t border-base-200 dark:border-base-800 px-5 py-4">
+            <p class="text-xs uppercase tracking-wider text-base-500 mb-2">{% trans "Chek" %}</p>
+            {% if sub_transaction.screenshot %}
+            <a href="{{ sub_transaction.screenshot.url }}" target="_blank" rel="noopener" class="inline-block">
+                <img src="{{ sub_transaction.screenshot.url }}" alt="{% trans 'To\'lov cheki' %}"
+                     class="rounded-default border border-base-200 dark:border-base-800" style="max-height:260px;">
+            </a>
+            {% elif sub_transaction.receipt_required %}
+            <p class="text-sm mb-0" style="color:#b91c1c">{% trans "Chek majburiy, lekin yuklanmagan." %}</p>
+            {% else %}
+            <p class="text-sm text-base-500 mb-0">{% trans "Naqd pul — chek talab qilinmaydi." %}</p>
+            {% endif %}
+        </div>
+
+        <form method="post" action="{{ post_url }}" class="border-t border-base-200 dark:border-base-800 p-5 flex flex-col gap-4">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+
+            <div class="flex flex-col gap-1">
+                <label for="{{ form.note.id_for_label }}" class="text-sm font-medium text-font-important-light dark:text-font-important-dark">{% trans "Izoh" %}</label>
+                {{ form.note }}
+                <p class="text-xs text-base-500 mb-0">{{ form.note.help_text }}</p>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-end">
+                <a href="{{ cancel_url }}" aria-label="Bekor qilish" title="Bekor qilish" class="min-h-11 flex items-center justify-center bg-base-100 hover:bg-base-200 text-base-700 font-medium px-4 py-2.5 rounded-default text-sm text-center transition-colors dark:bg-base-800 dark:text-base-300 dark:hover:bg-base-700">
+                    {% trans "Bekor qilish" %}
+                </a>
+                {% if approve %}
+                <button type="submit" {% if block_reason %}disabled{% endif %}
+                        aria-label="Ichki to'lovni tasdiqlash" title="Ichki to'lovni tasdiqlash"
+                        class="min-h-11 flex items-center justify-center gap-2 bg-primary-600 text-white font-medium px-4 py-2.5 rounded-default text-sm hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                    <span class="material-symbols-outlined text-[18px]" aria-hidden="true">check_circle</span>
+                    {{ action_label }}
+                </button>
+                {% else %}
+                <button type="submit"
+                        aria-label="Ichki to'lovni rad etish" title="Ichki to'lovni rad etish"
+                        class="min-h-11 flex items-center justify-center gap-2 text-white font-medium px-4 py-2.5 rounded-default text-sm transition-colors"
+                        style="background:#dc2626">
+                    <span class="material-symbols-outlined text-[18px]" aria-hidden="true">block</span>
+                    {{ action_label }}
+                </button>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

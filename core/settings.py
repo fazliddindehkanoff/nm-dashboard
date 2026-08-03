@@ -178,20 +178,42 @@ UNFOLD = {
     "SITE_TITLE": "Norbekov Markazi",
     "SITE_HEADER": "Norbekov Markazi",
     "SITE_URL": "/",
-    "SITE_SYMBOL": "science",
+    "SITE_SYMBOL": "medication",
     "DASHBOARD_CALLBACK": "main.views.dashboard_callback",
+    # DIQQAT: unfold 0.67 bu qiymatlarni to'g'ridan-to'g'ri `var(--color-primary-600)`
+    # ichiga qo'yadi va CSS rangi sifatida ishlatadi. Shuning uchun ular haqiqiy CSS
+    # rangi bo'lishi shart — "82 82 82" ko'rinishidagi RGB triplet brauzer tomonidan
+    # e'tiborsiz qoldiriladi va butun interfeys kulrangga aylanib qoladi.
     "COLORS": {
+        # Dorixona/tibbiyotga mos to'q ko'k-yashil (teal) palitra. 600 qiymati
+        # oq matn bilan WCAG AA dan o'tadigan darajada to'q tanlangan.
         "primary": {
-            "50": "250 250 250",
-            "100": "245 245 245",
-            "200": "229 229 229",
-            "300": "212 212 212",
-            "400": "163 163 163",
-            "500": "115 115 115",
-            "600": "82 82 82",
-            "700": "64 64 64",
-            "800": "38 38 38",
-            "900": "23 23 23",
+            "50": "#f0fdfa",
+            "100": "#d9f7f0",
+            "200": "#a7ece0",
+            "300": "#6ddac9",
+            "400": "#34c1ad",
+            "500": "#14a394",
+            "600": "#0f766e",
+            "700": "#115e59",
+            "800": "#134e4a",
+            "900": "#10403d",
+            "950": "#062e2c",
+        },
+        # Neytral kulrang ohangga bir oz iliqlik/ko'klik qo'shiladi — sof qora-oq
+        # o'rniga yumshoqroq fon beradi.
+        "base": {
+            "50": "#f7f9f9",
+            "100": "#eef2f2",
+            "200": "#dfe6e6",
+            "300": "#c5d0d1",
+            "400": "#94a4a5",
+            "500": "#697a7b",
+            "600": "#4e5f60",
+            "700": "#3c4b4c",
+            "800": "#25302f",
+            "900": "#161e1e",
+            "950": "#0b1111",
         },
     },
     "SIDEBAR": {
@@ -267,6 +289,11 @@ UNFOLD = {
                         "icon": "pending_actions",
                         "link": "/admin/main/transaction/?is_confirmed__exact=0",
                         "active": _is_unconfirmed_transactions_view,
+                    },
+                    {
+                        "title": "Ichki to'lovlar",
+                        "icon": "receipt_long",
+                        "link": "/admin/main/subtransaction/?status__exact=pending",
                     },
                     {
                         "title": "Qaytarilganlar",

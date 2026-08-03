@@ -1,6 +1,7 @@
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import User
@@ -236,6 +237,47 @@ class Transaction(models.Model):
         names = ", ".join(c.full_name for c in self.clients.all()) if self.pk else ""
         return f"{names or '—'} - {self.amount}"
 
+    @property
+    def approved_sub_transactions(self):
+        return _sub_transactions_with_status(self, SubTransaction.STATUS_APPROVED)
+
+    @property
+    def pending_sub_transactions(self):
+        return _sub_transactions_with_status(self, SubTransaction.STATUS_PENDING)
+
+    @property
+    def initial_amount(self):
+        """Qo'shimcha qabullardan oldingi asosiy to'lov summasi.
+
+        `amount` faqat tasdiqlangan ichki to'lovlar bilan o'sadi, shuning uchun
+        bu yerda ham faqat o'shalar ayiriladi.
+        """
+        sub_total = sum((item.amount for item in self.approved_sub_transactions), Decimal(0))
+        return max(Decimal(str(self.amount or 0)) - sub_total, Decimal(0))
+
+    @property
+    def pending_sub_total(self):
+        """Tasdiq kutayotgan ichki to'lovlarning jami summasi (qarzga ta'sir qilmaydi)."""
+        return sum((item.amount for item in self.pending_sub_transactions), Decimal(0))
+
+    @property
+    def pending_sub_count(self):
+        return len(self.pending_sub_transactions)
+
+    @property
+    def total_due(self):
+        """Ushbu transactiondagi barcha mijozlar uchun jami majburiyat."""
+        prefetched = getattr(self, '_prefetched_objects_cache', {}).get('participants')
+        clients_count = len(prefetched) if prefetched is not None else self.participants.count()
+        gross = Decimal(str(self.course_price or 0)) * clients_count
+        return max(gross - Decimal(str(self.discount_total or 0)), Decimal(0))
+
+    @property
+    def total_remaining(self):
+        prefetched = getattr(self, '_prefetched_objects_cache', {}).get('participants')
+        participants = prefetched if prefetched is not None else self.participants.select_related('transaction')
+        return sum((participant.remaining_amount for participant in participants), Decimal(0))
+
 
 class TransactionClient(models.Model):
     """Bitta to'lovdagi bitta mijozning ulushi (summa/chegirma/qarz).
@@ -265,6 +307,173 @@ class TransactionClient(models.Model):
     def __str__(self):
         return f"{self.client.full_name} — #{self.transaction_id}"
 
+    @property
+    def amount_due(self):
+        return max(
+            Decimal(str(self.transaction.course_price or 0)) - Decimal(str(self.share_discount or 0)),
+            Decimal(0),
+        )
+
+    @property
+    def remaining_amount(self):
+        return max(self.amount_due - Decimal(str(self.share_amount or 0)), Decimal(0))
+
+
+class SubTransaction(models.Model):
+    """Mavjud to'lov ichida keyinroq qabul qilingan qo'shimcha to'lov.
+
+    Har bir ichki to'lov admin tomonidan alohida tasdiqlanadi. Faqat
+    tasdiqlangan (`approved`) ichki to'lovlar mijozning qarzini kamaytiradi —
+    kutilayotgan yozuvlar hisob-kitobga umuman kirmaydi.
+    """
+
+    METHOD_CASH = 'naqd'
+    METHODS = (
+        (METHOD_CASH, _("Naqd pul")),
+        ('karta', _("Plastik karta")),
+        ('bank', _("Bank o'tkazmasi")),
+        ('online', _("Online (Payme / Click)")),
+    )
+
+    STATUS_PENDING = 'pending'
+    STATUS_APPROVED = 'approved'
+    STATUS_REJECTED = 'rejected'
+    STATUSES = (
+        (STATUS_PENDING, _("Tasdiq kutilmoqda")),
+        (STATUS_APPROVED, _("Tasdiqlangan")),
+        (STATUS_REJECTED, _("Rad etilgan")),
+    )
+
+    transaction = models.ForeignKey(
+        Transaction,
+        on_delete=models.CASCADE,
+        related_name='sub_transactions',
+        verbose_name=_("Asosiy to'lov"),
+    )
+    clients = models.ManyToManyField(
+        Client,
+        related_name='sub_transactions',
+        verbose_name=_("Mijozlar"),
+    )
+    amount = models.DecimalField(_("To'lov miqdori"), max_digits=12, decimal_places=2)
+    payment_method = models.CharField(
+        _("To'lov turi"),
+        max_length=20,
+        choices=METHODS,
+        default=METHOD_CASH,
+        help_text=_("Naqd pulda chek talab qilinmaydi, qolgan turlarda majburiy."),
+    )
+    screenshot = models.ImageField(
+        _("Chek / skrinshot"),
+        upload_to='subtransaction_receipts/%Y/%m/',
+        null=True,
+        blank=True,
+    )
+    received_at = models.DateTimeField(_("Qabul qilingan vaqt"), auto_now_add=True)
+    received_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='received_sub_transactions',
+        verbose_name=_("Qabul qildi"),
+    )
+
+    status = models.CharField(
+        _("Holati"), max_length=10, choices=STATUSES, default=STATUS_PENDING,
+    )
+    reviewed_at = models.DateTimeField(_("Ko'rib chiqilgan vaqt"), null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_sub_transactions',
+        verbose_name=_("Ko'rib chiqdi"),
+    )
+    review_note = models.CharField(_("Izoh"), max_length=255, blank=True, default='')
+
+    class Meta:
+        verbose_name = _("Ichki to'lov")
+        verbose_name_plural = _("Ichki to'lovlar")
+        ordering = ('-received_at', '-id')
+        constraints = [
+            models.CheckConstraint(check=models.Q(amount__gt=0), name='subtransaction_amount_gt_zero'),
+        ]
+
+    def __str__(self):
+        return f"#{self.transaction_id} + {self.amount}"
+
+    @staticmethod
+    def receipt_required_for(payment_method):
+        """Naqd pulda chek majburiy emas, qolgan barcha turlarda majburiy."""
+        return payment_method != SubTransaction.METHOD_CASH
+
+    @property
+    def receipt_required(self):
+        return self.receipt_required_for(self.payment_method)
+
+    @property
+    def is_approved(self):
+        return self.status == self.STATUS_APPROVED
+
+    @property
+    def is_pending(self):
+        return self.status == self.STATUS_PENDING
+
+    def clean(self):
+        super().clean()
+        if self.receipt_required and not self.screenshot:
+            raise ValidationError({
+                'screenshot': _("Naqd puldan boshqa to'lov turlarida chek majburiy."),
+            })
+
+    @property
+    def receiver_name(self):
+        if not self.received_by:
+            return "—"
+        try:
+            return self.received_by.operator.full_name
+        except Operator.DoesNotExist:
+            return self.received_by.get_full_name() or self.received_by.username
+
+    @property
+    def reviewer_name(self):
+        if not self.reviewed_by:
+            return "—"
+        try:
+            return self.reviewed_by.operator.full_name
+        except Operator.DoesNotExist:
+            return self.reviewed_by.get_full_name() or self.reviewed_by.username
+
+
+def _sub_transactions_with_status(transaction, status):
+    """Prefetch cache mavjud bo'lsa undan, aks holda DB dan filtrlaydi."""
+    prefetched = getattr(transaction, '_prefetched_objects_cache', {}).get('sub_transactions')
+    if prefetched is None:
+        return list(transaction.sub_transactions.filter(status=status).prefetch_related('clients'))
+    return [item for item in prefetched if item.status == status]
+
+
+def sub_transaction_shares(sub_transactions, allowed_client_ids=None):
+    """Ichki to'lovlar summasini tanlangan mijozlar orasida teng taqsimlaydi.
+
+    `allowed_client_ids` berilsa, o'sha ro'yxatdagi mijozlargina hisobga
+    olinadi (masalan tranzaksiyadan chiqarib yuborilgan mijoz uchun pul
+    yo'qolib qolmasligi uchun).
+    """
+    shares = {}
+    for sub_transaction in sub_transactions:
+        selected_ids = sorted(
+            client.pk for client in sub_transaction.clients.all()
+            if allowed_client_ids is None or client.pk in allowed_client_ids
+        )
+        if not selected_ids:
+            continue
+        for client_id, share in zip(selected_ids, _split_amount(sub_transaction.amount, len(selected_ids))):
+            shares[client_id] = shares.get(client_id, Decimal(0)) + share
+    return shares
+
 
 def _split_amount(total, n):
     """`total` ni `n` ta ulushga aniq (tiyingacha) bo'lib beradi.
@@ -291,10 +500,24 @@ def _recalc_transaction_participants(transaction):
         return
 
     n = len(participants)
-    amount_shares = _split_amount(transaction.amount, n)
+    # Faqat tasdiqlangan ichki to'lovlar pul sifatida hisobga olinadi.
+    sub_transactions = _sub_transactions_with_status(transaction, SubTransaction.STATUS_APPROVED)
+    sub_total = sum((item.amount for item in sub_transactions), Decimal(0))
+    base_amount = max(Decimal(str(transaction.amount or 0)) - sub_total, Decimal(0))
+    amount_by_client = {
+        participant.client_id: share
+        for participant, share in zip(participants, _split_amount(base_amount, n))
+    }
+
+    # Asosiy summa barcha ishtirokchilarga, har bir ichki to'lov esa faqat
+    # o'sha qabulda tanlangan mijozlarga teng taqsimlanadi.
+    for client_id, share in sub_transaction_shares(sub_transactions, set(amount_by_client)).items():
+        amount_by_client[client_id] += share
+
     discount_shares = _split_amount(transaction.discount_total, n)
 
-    for tc, a_share, d_share in zip(participants, amount_shares, discount_shares):
+    for tc, d_share in zip(participants, discount_shares):
+        a_share = amount_by_client[tc.client_id]
         if tc.share_amount != a_share or tc.share_discount != d_share:
             TransactionClient.objects.filter(pk=tc.pk).update(
                 share_amount=a_share, share_discount=d_share,

@@ -19,7 +19,7 @@
             {% trans "Pul qabul qilish" %}
         </div>
         <p class="text-sm text-base-500">
-            {% trans "Kiritilgan summa ushbu to'lovning umumiy miqdoriga qo'shiladi va mijozlarning qarzi qayta hisoblanadi." %}
+            {% trans "Qo'shimcha to'lov alohida ichki transaction sifatida saqlanadi va faqat tanlangan mijozlarning qarziga ta'sir qiladi." %}
         </p>
     </div>
 
@@ -38,21 +38,37 @@
                 <div class="font-semibold text-font-important-light dark:text-font-important-dark">{{ object.group|default:"—" }}</div>
             </div>
             <div class="flex flex-col gap-1">
+                <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Asosiy summa" %}</p>
+                <div class="font-semibold text-font-important-light dark:text-font-important-dark">{{ initial_amount|floatformat:0 }} UZS</div>
+            </div>
+            <div class="flex flex-col gap-1">
                 <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Hozirgi summa" %}</p>
                 <div class="font-semibold text-font-important-light dark:text-font-important-dark">{{ object.amount|floatformat:0 }} UZS</div>
             </div>
             <div class="flex flex-col gap-1">
-                <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Kurs narxi" %}</p>
+                <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Bir mijoz uchun" %}</p>
                 <div class="font-semibold text-font-important-light dark:text-font-important-dark">{{ course_price|floatformat:0 }} UZS</div>
+            </div>
+            <div class="flex flex-col gap-1">
+                <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Jami to'lanishi kerak" %}</p>
+                <div class="font-semibold text-font-important-light dark:text-font-important-dark">{{ object.total_due|floatformat:0 }} UZS</div>
             </div>
             <div class="flex flex-col gap-1">
                 <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Chegirma" %}</p>
                 <div class="font-semibold text-font-important-light dark:text-font-important-dark">{{ discount_total|floatformat:0 }} UZS</div>
             </div>
             <div class="flex flex-col gap-1">
-                <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Joriy qarz" %}</p>
-                <div class="font-semibold text-font-important-light dark:text-font-important-dark">{{ current_debt|floatformat:0 }} UZS</div>
+                <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Hozir qabul qilish mumkin" %}</p>
+                <div class="font-semibold tabular-nums" style="color:#0f766e">{{ available_amount|floatformat:0 }} UZS</div>
             </div>
+            {% if pending_sub_count %}
+            <div class="flex flex-col gap-1">
+                <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Tasdiq kutmoqda" %}</p>
+                <div class="font-semibold tabular-nums" style="color:#b45309">
+                    {{ pending_sub_total|floatformat:0 }} UZS · {{ pending_sub_count }} {% trans "ta" %}
+                </div>
+            </div>
+            {% endif %}
             <div class="flex flex-col gap-1">
                 <p class="text-xs uppercase tracking-wider text-base-500">{% trans "Holat" %}</p>
                 <div class="font-semibold text-font-important-light dark:text-font-important-dark">
@@ -68,9 +84,13 @@
             </div>
             <div class="divide-y divide-base-200 dark:divide-base-800">
                 {% for p in participants %}
-                <div class="px-4 py-3 flex items-center justify-between gap-3 text-sm">
+                <div class="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-3 text-sm">
                     <span class="font-medium text-font-important-light dark:text-font-important-dark">{{ p.client.full_name }}</span>
-                    <span class="text-base-500">{{ p.share_amount|floatformat:0 }} UZS · {% trans "qarz" %}: {{ p.debt|floatformat:0 }} UZS</span>
+                    <span class="text-base-500 tabular-nums">
+                        {% trans "joriy qarz" %}: {{ p.current_group_debt|floatformat:0 }} UZS
+                        {% if p.pending_amount %}· <span style="color:#b45309">{% trans "band" %}: {{ p.pending_amount|floatformat:0 }}</span>{% endif %}
+                        · <span style="color:#0f766e">{% trans "mumkin" %}: {{ p.available_amount|floatformat:0 }} UZS</span>
+                    </span>
                 </div>
                 {% endfor %}
             </div>
@@ -84,7 +104,7 @@
         </div>
         {% endif %}
 
-        <form method="post" class="flex flex-col gap-4">
+        <form method="post" enctype="multipart/form-data" class="flex flex-col gap-4">
             {% csrf_token %}
             {% if form.non_field_errors %}
             <div class="bg-base-50 border border-base-200 dark:bg-base-800 dark:border-base-700 rounded-default p-4 text-sm text-base-600 dark:text-base-300">
@@ -93,19 +113,54 @@
             {% endif %}
 
             {% if can_receive_payment %}
+            <fieldset class="flex flex-col gap-2">
+                <legend class="text-sm font-medium text-font-important-light dark:text-font-important-dark">{% trans "Mijozlarni tanlang" %}</legend>
+                <div class="border border-base-200 dark:border-base-700 rounded-default p-4 min-h-11">
+                    {{ form.clients }}
+                </div>
+                <p class="text-xs text-base-500 mb-0">{{ form.clients.help_text }}</p>
+                {% for error in form.clients.errors %}
+                <div class="text-red-600 dark:text-red-400 text-xs" role="alert">{{ error }}</div>
+                {% endfor %}
+            </fieldset>
             <div class="flex flex-col gap-1">
                 <label for="{{ form.amount.id_for_label }}" class="text-sm font-medium text-font-important-light dark:text-font-important-dark">{% trans "Qo'shiladigan summa" %}</label>
                 {{ form.amount }}
-                <p class="text-xs text-base-500 mb-0">{% trans "Bu summa hozirgi miqdorga qo'shiladi, umumiy to'lovni almashtirmaydi." %}</p>
+                <p class="text-xs text-base-500 mb-0">{% trans "Summa tanlangan mijozlar orasida teng taqsimlanadi." %}</p>
                 {% for error in form.amount.errors %}
-                <div class="text-base-700 dark:text-base-300 text-xs">{{ error }}</div>
+                <div class="text-red-600 dark:text-red-400 text-xs" role="alert">{{ error }}</div>
                 {% endfor %}
+            </div>
+            <div class="flex flex-col gap-1">
+                <label for="{{ form.payment_method.id_for_label }}" class="text-sm font-medium text-font-important-light dark:text-font-important-dark">{% trans "To'lov turi" %}</label>
+                {{ form.payment_method }}
+                <p class="text-xs text-base-500 mb-0">{{ form.payment_method.help_text }}</p>
+                {% for error in form.payment_method.errors %}
+                <div class="text-red-600 dark:text-red-400 text-xs" role="alert">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="flex flex-col gap-1">
+                <label for="{{ form.screenshot.id_for_label }}" class="text-sm font-medium text-font-important-light dark:text-font-important-dark">
+                    {% trans "Chek / skrinshot" %}
+                    <span id="receipt-requirement" class="ml-1 text-xs font-normal" data-cash-label="{% trans 'ixtiyoriy' %}" data-required-label="{% trans 'majburiy' %}"></span>
+                </label>
+                {{ form.screenshot }}
+                <p class="text-xs text-base-500 mb-0">{{ form.screenshot.help_text }}</p>
+                {% for error in form.screenshot.errors %}
+                <div class="text-red-600 dark:text-red-400 text-xs" role="alert">{{ error }}</div>
+                {% endfor %}
+            </div>
+            <div class="rounded-default p-4 flex items-start gap-3 text-sm" style="background:rgba(15,118,110,.08)">
+                <span class="material-symbols-outlined text-[20px]" style="color:#0f766e" aria-hidden="true">info</span>
+                <p class="mb-0 text-base-600 dark:text-base-300">
+                    {% trans "Qabul qilingan pul darhol qarzdan ayirilmaydi — avval admin ushbu ichki to'lovni tasdiqlashi kerak." %}
+                </p>
             </div>
             <button type="submit"
                     aria-label="Qo'shimcha summani saqlash" title="Qo'shimcha summani saqlash"
-                    class="flex items-center justify-center gap-2 bg-base-900 text-white font-medium px-4 py-2.5 rounded-default text-sm hover:bg-base-700 transition-colors mt-2 dark:bg-base-100 dark:text-base-900 dark:hover:bg-base-200">
+                    class="min-h-11 flex items-center justify-center gap-2 bg-primary-600 text-white font-medium px-4 py-2.5 rounded-default text-sm hover:bg-primary-700 transition-colors mt-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2">
                 <span class="material-symbols-outlined text-[18px]" aria-hidden="true">save</span>
-                {% trans "Saqlash" %}
+                {% trans "Pulni qabul qilish" %}
             </button>
             {% else %}
             <a href="{{ change_url }}" class="flex items-center justify-center gap-2 bg-base-100 hover:bg-base-200 text-base-700 font-medium px-4 py-2.5 rounded-default text-sm transition-colors mt-2 dark:bg-base-800 dark:text-base-300 dark:hover:bg-base-700">
@@ -115,5 +170,27 @@
             {% endif %}
         </form>
     </div>
+
+    {% include "admin/main/transaction/subtransactions_table.html" with original=object embedded=True %}
 </div>
+
+{# Chek majburiyligi to'lov turiga qarab ko'rsatiladi. Haqiqiy tekshiruv serverda. #}
+<script>
+(function () {
+    var method = document.getElementById('{{ form.payment_method.auto_id }}');
+    var receipt = document.getElementById('{{ form.screenshot.auto_id }}');
+    var hint = document.getElementById('receipt-requirement');
+    if (!method || !receipt || !hint) return;
+
+    function sync() {
+        var isCash = method.value === '{{ form.payment_method.field.initial }}';
+        receipt.required = !isCash;
+        hint.textContent = '(' + (isCash ? hint.dataset.cashLabel : hint.dataset.requiredLabel) + ')';
+        hint.style.color = isCash ? '#6b7280' : '#b45309';
+    }
+
+    method.addEventListener('change', sync);
+    sync();
+})();
+</script>
 {% endblock %}
