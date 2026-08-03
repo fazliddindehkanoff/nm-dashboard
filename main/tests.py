@@ -1525,7 +1525,7 @@ class ConfirmRefundPreviewTestCase(TestCase):
         with mock.patch('main.admin.send_payment_qr', return_value=(True, 'ok')):
             response = self.admin.confirm_transaction_detail(request, str(tx.pk))
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response['Location'], reverse('admin:main_transaction_detail', args=[tx.pk]))
+        self.assertEqual(response['Location'], reverse('admin:main_transaction_change', args=[tx.pk]))
 
     def test_refund_post_rejects_external_next_url(self):
         tx = self._tx()
@@ -1858,19 +1858,16 @@ class TransactionDetailViewTestCase(TestCase):
             is_confirmed=False,
         )
 
-    def test_detail_is_read_only_and_links_to_original_change_form(self):
-        request = _request_with_messages(
-            self.superuser,
-            reverse('admin:main_transaction_detail', args=[self.transaction.pk]),
-        )
-        response = self.admin.transaction_detail_view(request, str(self.transaction.pk))
-        response.render()
+    def test_default_change_url_is_read_only_and_links_to_edit_mode(self):
+        self.client.force_login(self.superuser)
+        change_url = reverse('admin:main_transaction_change', args=[self.transaction.pk])
+        response = self.client.get(change_url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.template_name, 'admin/main/transaction/detail.html')
+        self.assertTemplateUsed(response, 'admin/main/transaction/detail.html')
         self.assertEqual(
             response.context_data['change_url'],
-            reverse('admin:main_transaction_change', args=[self.transaction.pk]),
+            f'{change_url}?edit=1',
         )
         self.assertContains(response, 'Tahrirlash')
         self.assertNotContains(response, 'name="amount"')
@@ -1879,19 +1876,31 @@ class TransactionDetailViewTestCase(TestCase):
     def test_edit_button_target_keeps_original_edit_form(self):
         self.client.force_login(self.superuser)
         response = self.client.get(
-            reverse('admin:main_transaction_change', args=[self.transaction.pk])
+            reverse('admin:main_transaction_change', args=[self.transaction.pk]),
+            {'edit': '1'},
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'name="amount"')
 
-    def test_transaction_list_link_targets_detail(self):
+    def test_transaction_list_link_targets_read_only_change_url(self):
         request = _request_with_messages(self.superuser)
         obj = self.admin.get_queryset(request).get(pk=self.transaction.pk)
         link = str(self.admin.transaction_link(obj))
         self.assertIn(
-            reverse('admin:main_transaction_detail', args=[self.transaction.pk]),
+            reverse('admin:main_transaction_change', args=[self.transaction.pk]),
             link,
+        )
+
+    def test_legacy_detail_url_redirects_to_change_url(self):
+        request = _request_with_messages(self.superuser)
+        response = self.admin.legacy_transaction_detail_view(
+            request, str(self.transaction.pk)
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response['Location'],
+            reverse('admin:main_transaction_change', args=[self.transaction.pk]),
         )
 
 

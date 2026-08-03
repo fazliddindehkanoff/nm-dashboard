@@ -657,19 +657,29 @@ class TransactionAdmin(ModelAdmin):
     list_before_template = "admin/main/transaction/month_filter_badges.html"
     change_form_outer_after_template = "admin/main/transaction/subtransactions_table.html"
 
-    # To'lov satri faqat o'qiladigan detail sahifani ochadi. Asl Django
-    # tahrirlash formasi detail sahifadagi alohida tugma orqali ochiladi.
+    # Eski /detail/ havolalarini canonical /change/ sahifaga yo'naltiramiz.
+    # /change/ odatda read-only detail; faqat ?edit=1 bo'lsa asl forma ochiladi.
     def get_urls(self):
         urls = super().get_urls()
         info = self.model._meta.app_label, self.model._meta.model_name
         custom = [
             path(
                 "<path:object_id>/detail/",
-                self.admin_site.admin_view(self.transaction_detail_view),
+                self.admin_site.admin_view(self.legacy_transaction_detail_view),
                 name="%s_%s_detail" % info,
             ),
         ]
         return custom + urls
+
+    def legacy_transaction_detail_view(self, request, object_id):
+        return redirect("admin:main_transaction_change", object_id)
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        if request.method == "POST" or request.GET.get("edit") == "1":
+            return super().change_view(
+                request, object_id, form_url=form_url, extra_context=extra_context
+            )
+        return self.transaction_detail_view(request, object_id)
 
     def transaction_detail_view(self, request, object_id):
         obj = self.get_object(request, object_id)
@@ -684,7 +694,8 @@ class TransactionAdmin(ModelAdmin):
             "title": _("To'lov #%(id)s") % {"id": obj.pk},
             "transaction": obj,
             "original": obj,
-            "change_url": reverse("admin:main_transaction_change", args=[obj.pk]),
+            "change_url": "%s?edit=1"
+            % reverse("admin:main_transaction_change", args=[obj.pk]),
             "changelist_url": reverse("admin:main_transaction_changelist"),
             "confirm_url": reverse(
                 "admin:main_transaction_confirm_transaction_detail", args=[obj.pk]
@@ -978,7 +989,7 @@ class TransactionAdmin(ModelAdmin):
             'title': _("Pul qabul qilish"),
             'object': obj,
             'form': form,
-            'change_url': reverse('admin:main_transaction_detail', args=[obj.pk]),
+            'change_url': reverse('admin:main_transaction_change', args=[obj.pk]),
             'opts': self.model._meta,
         }
         return TemplateResponse(request, "admin/main/transaction/receive_payment.html", context)
@@ -1044,12 +1055,12 @@ class TransactionAdmin(ModelAdmin):
             _("Ichki to'lov qabul qilindi va admin tasdig'iga yuborildi."),
             level=messages.SUCCESS,
         )
-        return redirect('admin:main_transaction_detail', object_id)
+        return redirect('admin:main_transaction_change', object_id)
 
     # ---- Ustunlar / ko'rinish ----
     @display(description=_("Mijozlar"))
     def transaction_link(self, obj):
-        url = reverse("admin:main_transaction_detail", args=[obj.pk])
+        url = reverse("admin:main_transaction_change", args=[obj.pk])
         names = [client.full_name for client in obj.clients.all()]
         return format_html(
             '<a href="{}" class="text-base-700 dark:text-base-300 font-medium hover:underline">{}</a>',
@@ -1158,7 +1169,7 @@ class TransactionAdmin(ModelAdmin):
 
     def _confirmation_cancel_url(self, request, object_id, detail=False):
         fallback = (
-            reverse('admin:main_transaction_detail', args=[object_id])
+            reverse('admin:main_transaction_change', args=[object_id])
             if detail else reverse('admin:main_transaction_changelist')
         )
         return self._safe_redirect_url(request, request.META.get('HTTP_REFERER'), fallback)
@@ -1346,7 +1357,7 @@ class SubTransactionAdmin(ModelAdmin):
     def transaction_link(self, obj):
         return format_html(
             '<a href="{}" class="text-primary-600 dark:text-primary-400 hover:underline">#{}</a>',
-            reverse('admin:main_transaction_detail', args=[obj.transaction_id]),
+            reverse('admin:main_transaction_change', args=[obj.transaction_id]),
             obj.transaction_id,
         )
 
