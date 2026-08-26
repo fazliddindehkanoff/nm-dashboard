@@ -68,6 +68,19 @@
         </div>
         {% endif %}
 
+        <div class="border-t border-base-200 dark:border-base-800 px-5 py-4">
+            <p class="text-xs uppercase tracking-wider text-base-500 mb-3">{% trans "Chek rasmi" %}</p>
+            {% if transaction.screenshot %}
+            <a href="{{ transaction.screenshot.url }}" target="_blank" rel="noopener" class="inline-block">
+                <img src="{{ transaction.screenshot.url }}" alt="{% trans 'To\'lov cheki' %}"
+                     class="rounded-default border border-base-200 dark:border-base-800 object-contain"
+                     style="max-height:420px;max-width:100%;">
+            </a>
+            {% else %}
+            <p class="text-sm text-base-500 mb-0">{% trans "Chek yuklanmagan." %}</p>
+            {% endif %}
+        </div>
+
         <form method="post" action="{{ post_url }}" class="border-t border-base-200 dark:border-base-800 p-5 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-end">
             {% csrf_token %}
             <input type="hidden" name="next" value="{{ next_url }}">

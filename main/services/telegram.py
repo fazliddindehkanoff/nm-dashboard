@@ -14,6 +14,8 @@ from io import BytesIO
 
 import requests
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
+from django.utils.html import escape
 
 import qrcode
 
@@ -62,27 +64,55 @@ def generate_qr_png(data):
     return buffer
 
 
-def _build_caption(transaction, client):
-    operator = transaction.operator
+def _user_name(user):
+    if not user:
+        return "—"
+    try:
+        return user.operator.full_name
+    except (AttributeError, ObjectDoesNotExist):
+        return user.get_full_name() or user.username
+
+
+def _format_amount(amount):
+    return f"{amount:,.2f}".replace(",", " ") + " UZS"
+
+
+def _build_caption(transaction, client, sub_transaction=None):
     client_name = client.full_name if client else "-"
-    operator_name = operator.full_name if operator else "-"
-    payment_type = transaction.get_payment_type_display()
-    amount = transaction.amount
+    group_name = str(transaction.group) if transaction.group else "—"
+
+    if sub_transaction is None:
+        title = "Tasdiqlangan to'lov"
+        receiver_name = transaction.operator.full_name if transaction.operator else "—"
+        approver_name = _user_name(transaction.confirmed_by)
+        payment_type = transaction.get_payment_type_display()
+        amount = transaction.amount
+        payment_id = f"#{transaction.pk}"
+    else:
+        title = "Tasdiqlangan ichki to'lov"
+        receiver_name = sub_transaction.receiver_name
+        approver_name = sub_transaction.reviewer_name
+        payment_type = sub_transaction.get_payment_method_display()
+        amount = sub_transaction.amount
+        payment_id = f"#{transaction.pk}.{sub_transaction.pk}"
 
     lines = [
-        "🧾 <b>Yangi tasdiqlangan to'lov</b>",
+        f"🧾 <b>{title}</b>",
         "",
-        f"👤 Mijoz: {client_name}",
-        f"🧑‍💼 Qabul qilgan xodim: {operator_name}",
-        f"💳 To'lov turi: {payment_type}",
-        f"💰 To'lov miqdori: {amount}",
+        f"🔖 To'lov ID: {escape(payment_id)}",
+        f"👤 Mijoz: {escape(client_name)}",
+        f"📚 Guruh / kurs: {escape(group_name)}",
+        f"🧑‍💼 Qabul qildi: {escape(receiver_name)}",
+        f"✅ Tasdiqladi: {escape(approver_name)}",
+        f"💳 To'lov turi: {escape(payment_type)}",
+        f"💰 To'lov miqdori: <b>{escape(_format_amount(amount))}</b>",
     ]
     return "\n".join(lines)
 
 
-def _send_qr_to_client(token, chat_id, transaction, client):
+def _send_qr_to_client(token, chat_id, transaction, client, sub_transaction=None):
     qr_buffer = generate_qr_png(client.uuid)
-    caption = _build_caption(transaction, client)
+    caption = _build_caption(transaction, client, sub_transaction=sub_transaction)
 
     url = API_BASE.format(token=token, method="sendPhoto")
     resp = requests.post(
@@ -104,7 +134,7 @@ def _send_qr_to_client(token, chat_id, transaction, client):
     return False, f"{client.full_name}: {description}"
 
 
-def send_payment_qr(transaction):
+def send_payment_qr(transaction, sub_transaction=None):
     """To'lovga biriktirilgan har bir mijoz uchun alohida QR kodni umumiy
     Telegram guruh chatiga yuboradi.
 
@@ -119,13 +149,17 @@ def send_payment_qr(transaction):
     token = _get_token()
     chat_id = _get_chat_id()
 
-    clients = list(transaction.clients.all())
+    clients = list(
+        sub_transaction.clients.all() if sub_transaction is not None else transaction.clients.all()
+    )
     if not clients:
         return False, "To'lovga mijoz biriktirilmagan."
 
     failures = []
     for client in clients:
-        ok, failure_detail = _send_qr_to_client(token, chat_id, transaction, client)
+        ok, failure_detail = _send_qr_to_client(
+            token, chat_id, transaction, client, sub_transaction=sub_transaction,
+        )
         if not ok:
             failures.append(failure_detail)
 

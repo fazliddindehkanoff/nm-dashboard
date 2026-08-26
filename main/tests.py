@@ -1395,6 +1395,45 @@ class SubTransactionApprovalTestCase(TestCase):
         self.tx.refresh_from_db()
         self.assertEqual(self.tx.amount, Decimal('100000'))
 
+    def test_review_page_shows_receipt_image_preview(self):
+        from django.contrib.admin.sites import AdminSite
+        from main.admin import SubTransactionAdmin
+
+        sub_transaction = SubTransaction.objects.create(
+            transaction=self.tx, amount=Decimal('100000'), payment_method='karta',
+            screenshot=_receipt(), received_by=self.superuser,
+        )
+        sub_transaction.clients.set([self.client_obj])
+        sub_admin = SubTransactionAdmin(SubTransaction, AdminSite())
+        request = _request_with_messages(
+            self.superuser, f'/admin/main/subtransaction/{sub_transaction.pk}/approve-row/',
+        )
+
+        response = sub_admin.approve_sub_transaction(request, str(sub_transaction.pk))
+        response.render()
+
+        self.assertContains(response, '<img', html=False)
+        self.assertContains(response, sub_transaction.screenshot.url)
+
+    def test_approval_post_sends_sub_transaction_qr(self):
+        from django.contrib.admin.sites import AdminSite
+        from main.admin import SubTransactionAdmin
+
+        sub_transaction = self._receive()
+        sub_admin = SubTransactionAdmin(SubTransaction, AdminSite())
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/subtransaction/{sub_transaction.pk}/approve-row/',
+            {'next': reverse('admin:main_subtransaction_changelist')},
+        )
+
+        with mock.patch('main.admin.send_payment_qr', return_value=(True, 'ok')) as notify:
+            response = sub_admin.approve_sub_transaction(request, str(sub_transaction.pk))
+
+        self.assertEqual(response.status_code, 302)
+        sub_transaction.refresh_from_db()
+        notify.assert_called_once_with(self.tx, sub_transaction=sub_transaction)
+
 
 class ConfirmRefundPreviewTestCase(TestCase):
     """Confirm/refund action GET must be preview-only; POST mutates finance state."""
@@ -1464,6 +1503,33 @@ class ConfirmRefundPreviewTestCase(TestCase):
         tx.refresh_from_db()
         self.assertTrue(tx.is_confirmed)
         self.assertEqual(tx.confirmed_by, self.superuser)
+
+    def test_reject_get_is_preview_only(self):
+        tx = self._tx()
+        request = _request_with_messages(
+            self.superuser, f'/admin/main/transaction/{tx.pk}/reject-detail/',
+        )
+        response = self.admin.reject_transaction_detail(request, str(tx.pk))
+        response.render()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'rad etish')
+        tx.refresh_from_db()
+        self.assertFalse(tx.is_refunded)
+
+    def test_reject_post_marks_pending_transaction_disapproved(self):
+        tx = self._tx()
+        request = _post_request_with_messages(
+            self.superuser,
+            f'/admin/main/transaction/{tx.pk}/reject-detail/',
+            {'next': reverse('admin:main_transaction_change', args=[tx.pk])},
+        )
+        response = self.admin.reject_transaction_detail(request, str(tx.pk))
+
+        self.assertEqual(response.status_code, 302)
+        tx.refresh_from_db()
+        self.assertFalse(tx.is_confirmed)
+        self.assertTrue(tx.is_refunded)
 
     def test_refund_get_preview_does_not_mutate(self):
         tx = self._tx()
@@ -1730,6 +1796,57 @@ class TelegramSingleChatTestCase(TestCase):
         self.assertEqual(kwargs['data']['chat_id'], '-100999')
 
     @override_settings(TELEGRAM={'BOT_TOKEN': 'tok', 'CHAT_ID': '-100999'})
+    def test_main_payment_caption_includes_receiver_and_approver(self):
+        from main.services import telegram
+
+        approver = User.objects.create_user(username='approver')
+        operator_user = User.objects.create_user(username='receiver')
+        operator = Operator.objects.create(
+            user=operator_user, full_name='Payment Receiver', phone_number='+998900000001',
+        )
+        self.tx.operator = operator
+        self.tx.confirmed_by = approver
+        self.tx.save(update_fields=['operator', 'confirmed_by'])
+
+        fake_response = mock.Mock(status_code=200)
+        fake_response.json.return_value = {'ok': True}
+        with mock.patch('main.services.telegram.requests.post', return_value=fake_response) as post:
+            telegram.send_payment_qr(self.tx)
+
+        caption = post.call_args.kwargs['data']['caption']
+        self.assertIn('Payment Receiver', caption)
+        self.assertIn('approver', caption)
+        self.assertIn('50 000.00 UZS', caption)
+
+    @override_settings(TELEGRAM={'BOT_TOKEN': 'tok', 'CHAT_ID': '-100999'})
+    def test_sub_payment_uses_its_own_amount_clients_and_audit_names(self):
+        from main.services import telegram
+
+        receiver = User.objects.create_user(username='receiver-user')
+        approver = User.objects.create_user(username='approver-user')
+        sub = SubTransaction.objects.create(
+            transaction=self.tx,
+            amount=Decimal('12500'),
+            payment_method='naqd',
+            received_by=receiver,
+            reviewed_by=approver,
+            status=SubTransaction.STATUS_APPROVED,
+        )
+        sub.clients.set([self.client_obj])
+
+        fake_response = mock.Mock(status_code=200)
+        fake_response.json.return_value = {'ok': True}
+        with mock.patch('main.services.telegram.requests.post', return_value=fake_response) as post:
+            ok, _ = telegram.send_payment_qr(self.tx, sub_transaction=sub)
+
+        self.assertTrue(ok)
+        caption = post.call_args.kwargs['data']['caption']
+        self.assertIn("Tasdiqlangan ichki to'lov", caption)
+        self.assertIn('receiver-user', caption)
+        self.assertIn('approver-user', caption)
+        self.assertIn('12 500.00 UZS', caption)
+
+    @override_settings(TELEGRAM={'BOT_TOKEN': 'tok', 'CHAT_ID': '-100999'})
     def test_sends_even_when_transaction_has_no_group(self):
         from main.services import telegram
         tx_no_group = _create_transaction_with_clients(
@@ -1872,6 +1989,20 @@ class TransactionDetailViewTestCase(TestCase):
         self.assertContains(response, 'Tahrirlash')
         self.assertNotContains(response, 'name="amount"')
         self.assertNotContains(response, 'id="id_amount"')
+
+    def test_detail_page_has_review_buttons_and_receipt_image_preview(self):
+        self.transaction.screenshot = _receipt()
+        self.transaction.save(update_fields=['screenshot'])
+        self.client.force_login(self.superuser)
+
+        response = self.client.get(
+            reverse('admin:main_transaction_change', args=[self.transaction.pk])
+        )
+
+        self.assertContains(response, 'Tasdiqlash')
+        self.assertContains(response, 'Rad etish')
+        self.assertContains(response, '<img', html=False)
+        self.assertContains(response, self.transaction.screenshot.url)
 
     def test_edit_button_target_keeps_original_edit_form(self):
         self.client.force_login(self.superuser)

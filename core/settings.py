@@ -17,6 +17,25 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _load_local_env(path):
+    """Load the project's ignored .env file without overriding deployed env vars."""
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if value[:1] == value[-1:] and value[:1] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+_load_local_env(BASE_DIR / ".env")
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
@@ -73,6 +92,10 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'core.wsgi.application'
+
+AUTHENTICATION_BACKENDS = [
+    'main.backends.RolePermissionBackend',
+]
 
 
 # Database
@@ -228,17 +251,19 @@ UNFOLD = {
                         "title": "Dashboard",
                         "icon": "dashboard",
                         "link": "/admin/",
-                        "permission": "main.permissions.is_not_plain_operator",
+                        "permission": "main.permissions.can_access_dashboard",
                     },
                     {
                         "title": "Maosh hisob-kitobi",
                         "icon": "payments",
                         "link": "/salaries/",
+                        "permission": "main.permissions.can_access_salaries",
                     },
                     {
                         "title": "QR skaner",
                         "icon": "qr_code_scanner",
                         "link": "/qr-verify/",
+                        "permission": "main.permissions.can_access_qr",
                     },
                 ],
             },
@@ -250,27 +275,37 @@ UNFOLD = {
                         "title": "Kurslar",
                         "icon": "school",
                         "link": "/admin/main/course/",
+                        "permission": "main.permissions.can_view_courses",
                     },
                     {
                         "title": "Guruhlar",
                         "icon": "groups",
                         "link": "/admin/main/group/",
+                        "permission": "main.permissions.can_view_groups",
                     },
                     {
                         "title": "Mijozlar",
                         "icon": "people",
                         "link": "/admin/main/client/",
+                        "permission": "main.permissions.can_view_clients",
                     },
                     {
-                        "title": "Operatorlar",
-                        "icon": "support_agent",
+                        "title": "Foydalanuvchilar",
+                        "icon": "manage_accounts",
                         "link": "/admin/main/operator/",
-                        "permission": "main.permissions.is_not_plain_operator",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                    {
+                        "title": "Rollar va ruxsatlar",
+                        "icon": "shield_person",
+                        "link": "/admin/main/roleconfiguration/",
+                        "permission": "main.permissions.can_manage_users",
                     },
                     {
                         "title": "Chegirmalar",
                         "icon": "sell",
                         "link": "/admin/main/discount/",
+                        "permission": "main.permissions.can_view_discounts",
                     },
                 ],
             },
@@ -283,23 +318,39 @@ UNFOLD = {
                         "icon": "payments",
                         "link": "/admin/main/transaction/",
                         "active": _is_payments_view,
+                        "permission": "main.permissions.can_view_transactions",
                     },
                     {
                         "title": "Tasdiqlash navbati",
                         "icon": "pending_actions",
                         "link": "/admin/main/transaction/?is_confirmed__exact=0",
                         "active": _is_unconfirmed_transactions_view,
+                        "permission": "main.permissions.can_view_transactions",
                     },
                     {
                         "title": "Ichki to'lovlar",
                         "icon": "receipt_long",
                         "link": "/admin/main/subtransaction/?status__exact=pending",
+                        "permission": "main.permissions.can_view_subtransactions",
                     },
                     {
                         "title": "Qaytarilganlar",
                         "icon": "assignment_return",
                         "link": "/admin/main/transaction/?is_refunded__exact=1",
                         "active": _is_refunded_transactions_view,
+                        "permission": "main.permissions.can_view_transactions",
+                    },
+                    {
+                        "title": "Kirim-chiqim va balans",
+                        "icon": "account_balance_wallet",
+                        "link": "/cashflow/",
+                        "permission": "main.permissions.can_access_cashflow",
+                    },
+                    {
+                        "title": "Xarajatlar",
+                        "icon": "receipt_long",
+                        "link": "/admin/main/expense/",
+                        "permission": "main.permissions.can_view_expenses",
                     },
                 ],
             },

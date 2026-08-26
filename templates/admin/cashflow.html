@@ -1,0 +1,115 @@
+{% extends 'unfold/layouts/base.html' %}
+{% load i18n unfold money %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block title %}Kirim-chiqim va balans | {{ site_title }}{% endblock %}
+
+{% block content %}
+<div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-8">
+    <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-5">
+        <div class="flex flex-col gap-1">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary-600 dark:text-primary-400" aria-hidden="true">account_balance_wallet</span>
+                <h1 class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark">Kassa nazorati</h1>
+            </div>
+            <p class="leading-relaxed mb-0 text-sm text-base-500">Tasdiqlangan tushumlar, xarajatlar va ayni vaqtdagi mablag‘.</p>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3">
+            <form method="get" class="flex items-center gap-2" data-turbo="false">
+                <select name="month" class="border border-base-200 bg-white rounded-default px-3 py-2 text-sm dark:bg-base-900 dark:border-base-800">
+                    {% for month_id, month_name in months %}
+                    <option value="{{ month_id }}" {% if selected_month == month_id %}selected{% endif %}>{{ month_name }}</option>
+                    {% endfor %}
+                </select>
+                <select name="year" class="border border-base-200 bg-white rounded-default px-3 py-2 text-sm dark:bg-base-900 dark:border-base-800">
+                    {% for year in available_years %}
+                    <option value="{{ year }}" {% if selected_year == year %}selected{% endif %}>{{ year }}</option>
+                    {% endfor %}
+                </select>
+                <button class="bg-base-900 text-white dark:bg-base-100 dark:text-base-900 font-medium px-4 py-2 rounded-default text-sm">Ko‘rsatish</button>
+            </form>
+            {% if can_add_expense %}
+            <a href="/admin/main/expense/add/" class="bg-primary-600 hover:bg-primary-700 text-white font-medium px-4 py-2 rounded-default text-sm inline-flex items-center justify-center gap-2">
+                <span class="material-symbols-outlined text-lg" aria-hidden="true">add</span>
+                Xarajat kiritish
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <section class="flex flex-col gap-5 lg:flex-row" aria-label="Kassa ko‘rsatkichlari">
+        <div class="bg-primary-600 text-white rounded-default p-6 shadow-xs relative overflow-hidden lg:w-1/2">
+            <div class="absolute -right-10 -top-10 w-36 h-36 rounded-full border-[24px] border-white/10" aria-hidden="true"></div>
+            <p class="text-sm text-white/75 mb-2">Ayni vaqtdagi kassa balansi</p>
+            <div class="font-semibold text-3xl tracking-tight">{{ balance|money }} <span class="text-base font-normal text-white/70">UZS</span></div>
+            <p class="text-xs text-white/65 mt-3">Barcha tasdiqlangan tushumlar − barcha xarajatlar</p>
+        </div>
+        <div class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-800 rounded-default p-6 shadow-xs grow lg:w-1/4">
+            <p class="text-sm text-base-500 mb-2">Davr kirimi</p>
+            <div class="font-semibold text-2xl text-font-important-light dark:text-font-important-dark">{{ period_income|money }}</div>
+            <p class="text-xs text-base-500 mt-2">{{ income_count }} ta tasdiqlangan to‘lov</p>
+        </div>
+        <div class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-800 rounded-default p-6 shadow-xs grow lg:w-1/4">
+            <p class="text-sm text-base-500 mb-2">Davr chiqimi</p>
+            <div class="font-semibold text-2xl text-font-important-light dark:text-font-important-dark">{{ period_expense|money }}</div>
+            <p class="text-xs text-base-500 mt-2">{{ expense_count }} ta xarajat</p>
+        </div>
+    </section>
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <section class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-800 rounded-default shadow-xs overflow-hidden">
+            <div class="border-b border-base-200 dark:border-base-800 px-6 py-4 flex items-center gap-2">
+                <span class="material-symbols-outlined text-primary-600 dark:text-primary-400" aria-hidden="true">south_west</span>
+                <h2 class="font-semibold text-[15px] text-font-important-light dark:text-font-important-dark">Kirimlar</h2>
+                <span class="ml-auto text-xs text-base-500">{{ selected_month }} / {{ selected_year }}</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead><tr class="border-b border-base-200 dark:border-base-800 text-left text-xs uppercase text-base-500">
+                        <th class="px-6 py-3 font-medium">Sana / mijoz</th>
+                        <th class="px-6 py-3 font-medium">Operator</th>
+                        <th class="px-6 py-3 font-medium text-right">Summa</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for item in recent_incomes %}
+                    <tr class="border-b border-base-200 dark:border-base-800 last:border-0">
+                        <td class="px-6 py-3"><div class="font-medium text-font-important-light dark:text-font-important-dark">{% for client in item.clients.all %}{{ client.full_name }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</div><div class="text-xs text-base-500">{{ item.date|date:"d.m.Y" }} · #{{ item.id }}</div></td>
+                        <td class="px-6 py-3 text-base-500">{{ item.operator|default:"—" }}</td>
+                        <td class="px-6 py-3 text-right font-semibold text-primary-700 dark:text-primary-400">+{{ item.amount|money }}</td>
+                    </tr>
+                    {% empty %}<tr><td colspan="3" class="px-6 py-10 text-center text-base-500">Bu davrda kirim yo‘q.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-800 rounded-default shadow-xs overflow-hidden">
+            <div class="border-b border-base-200 dark:border-base-800 px-6 py-4 flex items-center gap-2">
+                <span class="material-symbols-outlined text-base-500" aria-hidden="true">north_east</span>
+                <h2 class="font-semibold text-[15px] text-font-important-light dark:text-font-important-dark">Chiqimlar</h2>
+                <a href="/admin/main/expense/" class="ml-auto text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline">Barchasi</a>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead><tr class="border-b border-base-200 dark:border-base-800 text-left text-xs uppercase text-base-500">
+                        <th class="px-6 py-3 font-medium">Sana / kategoriya</th>
+                        <th class="px-6 py-3 font-medium">Izoh</th>
+                        <th class="px-6 py-3 font-medium text-right">Summa</th>
+                    </tr></thead>
+                    <tbody>
+                    {% for item in recent_expenses %}
+                    <tr class="border-b border-base-200 dark:border-base-800 last:border-0">
+                        <td class="px-6 py-3"><div class="font-medium text-font-important-light dark:text-font-important-dark">{{ item.get_category_display }}</div><div class="text-xs text-base-500">{{ item.date|date:"d.m.Y" }}</div></td>
+                        <td class="px-6 py-3 text-base-500">{{ item.description|default:"—" }}</td>
+                        <td class="px-6 py-3 text-right font-semibold text-font-important-light dark:text-font-important-dark">−{{ item.amount|money }}</td>
+                    </tr>
+                    {% empty %}<tr><td colspan="3" class="px-6 py-10 text-center text-base-500">Bu davrda chiqim yo‘q.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

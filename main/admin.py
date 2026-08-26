@@ -2,10 +2,13 @@ import re
 from decimal import Decimal
 
 from django import forms
+from django.apps import apps
 from django.db import models, transaction as db_transaction
 from django.contrib import admin, messages
 from django.contrib.auth.models import User, Permission
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect
+from django.http import JsonResponse
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
@@ -27,8 +30,10 @@ from unfold.widgets import (
 
 from .models import (
     Course, Group, Client, Operator, Discount, Transaction, TransactionClient, SubTransaction, Teacher,
+    AttendanceLesson, AttendanceRecord, Expense, RoleConfiguration,
     _recalc_transaction_participants, sub_transaction_shares,
 )
+from .permissions import is_operator
 from .services.amocrm import (
     sync_contacts,
     link_client_to_amocrm,
@@ -41,7 +46,39 @@ from .services.telegram import send_payment_qr, TelegramNotConfigured
 
 
 def _is_plain_operator(request):
-    return not request.user.is_superuser and hasattr(request.user, 'operator')
+    return is_operator(request.user)
+
+
+def _with_attendance_payment_status(queryset):
+    """Davomat jadvallarida to'lov holatini N+1 so'rovsiz hisoblaydi."""
+    return queryset.annotate(
+        _confirmed_payment_count=models.Count(
+            'client__participations',
+            filter=models.Q(
+                client__participations__transaction__group_id=models.F('group_id'),
+                client__participations__transaction__is_confirmed=True,
+                client__participations__transaction__is_refunded=False,
+            ),
+            distinct=True,
+        ),
+        _pending_payment_count=models.Count(
+            'client__participations',
+            filter=models.Q(
+                client__participations__transaction__group_id=models.F('group_id'),
+                client__participations__transaction__is_confirmed=False,
+                client__participations__transaction__is_refunded=False,
+            ),
+            distinct=True,
+        ),
+        _confirmed_payment_debt=models.Sum(
+            'client__participations__debt',
+            filter=models.Q(
+                client__participations__transaction__group_id=models.F('group_id'),
+                client__participations__transaction__is_confirmed=True,
+                client__participations__transaction__is_refunded=False,
+            ),
+        ),
+    )
 
 
 def _get_or_create_client(request, client_name, client_phone):
@@ -103,6 +140,11 @@ class GroupAdmin(ModelAdmin):
                 self.admin_site.admin_view(self.group_detail_view),
                 name="%s_%s_detail" % info,
             ),
+            path(
+                "<path:object_id>/attendance/<int:record_id>/status/",
+                self.admin_site.admin_view(self.attendance_status_view),
+                name="%s_%s_attendance_status" % info,
+            ),
         ]
         return custom + urls
 
@@ -116,6 +158,8 @@ class GroupAdmin(ModelAdmin):
         )
 
     def group_detail_view(self, request, object_id):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
         group = self.get_object(request, object_id)
         if group is None:
             self.message_user(request, _("Guruh topilmadi."), level=messages.ERROR)
@@ -128,12 +172,33 @@ class GroupAdmin(ModelAdmin):
             .order_by("-date", "-id")
         )
 
+        active_tab = request.GET.get('tab', 'payments')
+        if active_tab not in {'payments', 'attendance', 'anketa', 'statistics'}:
+            active_tab = 'payments'
+
+        if active_tab == 'attendance':
+            self._ensure_group_attendance_records(group)
+
+        attendance_records = _with_attendance_payment_status(
+            AttendanceRecord.objects.filter(group=group)
+            .select_related('client__operator', 'group__course')
+            .prefetch_related('lessons')
+        ).order_by('client__full_name', 'id')
+        if _is_plain_operator(request):
+            attendance_records = attendance_records.filter(
+                client__operator=request.user.operator
+            )
+
         context = {
             **self.admin_site.each_context(request),
             "title": str(group),
             "group": group,
             "transactions": transactions,
             "teachers": group.teachers.all(),
+            "active_tab": active_tab,
+            "attendance_records": attendance_records,
+            "attendance_statuses": AttendanceRecord.STATUSES,
+            "can_change_attendance": request.user.has_perm('main.change_attendancerecord'),
             "change_url": reverse("admin:main_group_change", args=[group.pk]),
             "delete_url": reverse("admin:main_group_delete", args=[group.pk]),
             "changelist_url": reverse("admin:main_group_changelist"),
@@ -141,6 +206,67 @@ class GroupAdmin(ModelAdmin):
             "has_delete_permission": self.has_delete_permission(request, group),
         }
         return TemplateResponse(request, "admin/main/group/detail.html", context)
+
+    def _ensure_group_attendance_records(self, group):
+        existing_client_ids = set(
+            AttendanceRecord.objects.filter(group=group).values_list('client_id', flat=True)
+        )
+        participations = (
+            TransactionClient.objects.filter(
+                transaction__group=group,
+                transaction__is_refunded=False,
+            )
+            .select_related('transaction__operator__user')
+            .order_by('client_id', 'id')
+        )
+        records = []
+        for participation in participations:
+            if participation.client_id in existing_client_ids:
+                continue
+            operator = participation.transaction.operator
+            records.append(AttendanceRecord(
+                client_id=participation.client_id,
+                group=group,
+                created_by_id=operator.user_id if operator else None,
+            ))
+            existing_client_ids.add(participation.client_id)
+        if records:
+            AttendanceRecord.objects.bulk_create(records, ignore_conflicts=True)
+
+    def attendance_status_view(self, request, object_id, record_id):
+        if request.method != 'POST':
+            return JsonResponse({'error': _("Faqat POST so'rovi qabul qilinadi.")}, status=405)
+        if not request.user.has_perm('main.change_attendancerecord'):
+            return JsonResponse({'error': _("Davomatni o'zgartirish huquqi yo'q.")}, status=403)
+
+        group = self.get_object(request, object_id)
+        if group is None:
+            return JsonResponse({'error': _("Guruh topilmadi.")}, status=404)
+
+        records = AttendanceRecord.objects.filter(pk=record_id, group=group)
+        if _is_plain_operator(request):
+            records = records.filter(client__operator=request.user.operator)
+        record = records.first()
+        if record is None:
+            return JsonResponse({'error': _("Davomat kartasi topilmadi.")}, status=404)
+
+        status_value = request.POST.get('status', '')
+        valid_statuses = dict(AttendanceRecord.STATUSES)
+        if status_value not in valid_statuses:
+            return JsonResponse({'error': _("Noto'g'ri davomat holati.")}, status=400)
+
+        record.status = status_value
+        record.save(update_fields=('status', 'updated_at'))
+        return JsonResponse({
+            'ok': True,
+            'status': record.status,
+            'label': str(valid_statuses[record.status]),
+        })
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.attendance_records.exists():
+            return False
+        return super().has_delete_permission(request, obj)
 
     @display(description=_("O'qituvchilar"))
     def get_teachers(self, obj):
@@ -227,6 +353,8 @@ class ClientAdmin(ModelAdmin):
         return custom + urls
 
     def client_detail_view(self, request, object_id):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
         client = self.get_object(request, object_id)
         if client is None:
             self.message_user(request, _("Mijoz topilmadi."), level=messages.ERROR)
@@ -251,6 +379,11 @@ class ClientAdmin(ModelAdmin):
         total_paid = (
             confirmed_transactions.aggregate(total=models.Sum("share_amount"))["total"] or 0
         )
+        attendance_records = (
+            client.attendance_records.select_related('group__course')
+            .prefetch_related('lessons')
+            .order_by('-updated_at')
+        )
 
         context = {
             **self.admin_site.each_context(request),
@@ -260,6 +393,8 @@ class ClientAdmin(ModelAdmin):
             "joined_groups_count": joined_groups_count,
             "loan_amount": loan_amount,
             "total_paid": total_paid,
+            "attendance_records": attendance_records,
+            "can_change_attendance": request.user.has_perm('main.change_attendancerecord'),
             "change_url": reverse("admin:main_client_change", args=[client.pk]),
             "delete_url": reverse("admin:main_client_delete", args=[client.pk]),
             "changelist_url": reverse("admin:main_client_changelist"),
@@ -267,6 +402,11 @@ class ClientAdmin(ModelAdmin):
             "has_delete_permission": self.has_delete_permission(request, client),
         }
         return TemplateResponse(request, "admin/main/client/detail.html", context)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.attendance_records.exists():
+            return False
+        return super().has_delete_permission(request, obj)
 
     # ---- Tezkor mijoz qo'shish (modal) ----
     def add_client_quick(self, request):
@@ -351,17 +491,62 @@ class ClientAdmin(ModelAdmin):
 
 
 def grant_operator_permissions(user):
-    codenames = [
-        'add_transaction', 'change_transaction', 'view_transaction',
-        'add_transactionclient', 'change_transactionclient', 'view_transactionclient', 'delete_transactionclient',
-        'view_client', 'add_client', 'change_client',
-        'view_group', 'view_course', 'view_discount',
-        # Operator o'zi qabul qilgan ichki to'lovning holatini ko'ra olishi kerak.
-        # Tasdiqlash/rad etish esa faqat superuser uchun (has_review_permission).
-        'view_subtransaction',
-    ]
-    perms = Permission.objects.filter(codename__in=codenames)
-    user.user_permissions.add(*perms)
+    """Eski chaqiruvlar bilan moslik: ruxsatlar endi rol matritsasidan olinadi."""
+    if not user.is_staff:
+        user.is_staff = True
+        user.save(update_fields=['is_staff'])
+
+
+class RoleConfigurationForm(forms.ModelForm):
+    class Meta:
+        model = RoleConfiguration
+        fields = ('permissions',)
+        widgets = {'permissions': UnfoldAdminCheckboxSelectMultiple}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        current_models = {
+            model._meta.model_name for model in apps.get_app_config('main').get_models()
+        }
+        self.fields['permissions'].queryset = Permission.objects.filter(
+            content_type__app_label='main',
+            content_type__model__in=current_models,
+        ).select_related('content_type').order_by('content_type__model', 'codename')
+
+
+@admin.register(RoleConfiguration)
+class RoleConfigurationAdmin(ModelAdmin):
+    form = RoleConfigurationForm
+    list_display = ('role_name', 'permission_count')
+    fields = ('role_name', 'permissions')
+    readonly_fields = ('role_name',)
+
+    @display(description=_("Rol"))
+    def role_name(self, obj):
+        return obj.get_code_display()
+
+    @display(description=_("Ochiq funksiyalar"))
+    def permission_count(self, obj):
+        if obj.code == RoleConfiguration.ROLE_ADMIN:
+            return _("Barcha funksiyalar")
+        return _("%(count)s ta ruxsat") % {'count': obj.permissions.count()}
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser and (
+            obj is None or obj.code != RoleConfiguration.ROLE_ADMIN
+        )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class OperatorForm(forms.ModelForm):
@@ -374,7 +559,15 @@ class OperatorForm(forms.ModelForm):
 
     class Meta:
         model = Operator
-        fields = ('full_name', 'phone_number', 'password')
+        fields = ('full_name', 'phone_number', 'role', 'password')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Eski integratsiyalar rol yubormasa, sotuvchi sifatida davom etadi.
+        self.fields['role'].required = False
+
+    def clean_role(self):
+        return self.cleaned_data.get('role') or RoleConfiguration.ROLE_OPERATOR
 
     def clean(self):
         cleaned_data = super().clean()
@@ -403,9 +596,29 @@ class OperatorForm(forms.ModelForm):
 @admin.register(Operator)
 class OperatorAdmin(ModelAdmin):
     form = OperatorForm
-    list_display = ('full_name', 'phone_number', 'user')
-    search_fields = ('full_name', 'phone_number')
-    fields = ('full_name', 'phone_number', 'password')
+    list_display = ('full_name', 'phone_number', 'role_badge', 'user')
+    search_fields = ('full_name', 'phone_number', 'user__username')
+    list_filter = ('role',)
+    fields = ('full_name', 'phone_number', 'role', 'password')
+
+    @display(description=_("Rol"), label=True)
+    def role_badge(self, obj):
+        return obj.get_role_display()
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return request.user.is_superuser
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser
 
     def save_model(self, request, obj, form, change):
         if not obj.user:
@@ -419,9 +632,147 @@ class OperatorAdmin(ModelAdmin):
             password = form.cleaned_data.get('password')
             if password:
                 obj.user.set_password(password)
-                obj.user.save()
+
+        if obj.user:
+            obj.user.is_staff = True
+            obj.user.is_superuser = obj.role == RoleConfiguration.ROLE_ADMIN
+            obj.user.save()
 
         super().save_model(request, obj, form, change)
+
+
+@admin.register(Expense)
+class ExpenseAdmin(ModelAdmin):
+    list_display = ('date', 'category_badge', 'amount', 'description', 'created_by')
+    list_filter = ('category', 'date', 'created_by')
+    search_fields = ('description', 'created_by__username', 'created_by__operator__full_name')
+    date_hierarchy = 'date'
+    readonly_fields = ('created_by', 'created_at')
+    fields = ('date', 'category', 'amount', 'description', 'created_by', 'created_at')
+
+    @display(description=_("Kategoriya"), label=True)
+    def category_badge(self, obj):
+        return obj.get_category_display()
+
+    def save_model(self, request, obj, form, change):
+        if not obj.pk:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+class AttendanceLessonInline(TabularInline):
+    model = AttendanceLesson
+    extra = 1
+    fields = ('date', 'note', 'marked_by')
+    readonly_fields = ('marked_by',)
+    ordering = ('-date',)
+
+
+@admin.register(AttendanceRecord)
+class AttendanceRecordAdmin(ModelAdmin):
+    inlines = (AttendanceLessonInline,)
+    list_display = (
+        'client_link', 'course_name', 'group', 'status_badge', 'payment_badge',
+        'lessons_count', 'last_attended_at', 'updated_at',
+    )
+    list_filter = ('status', 'group__course', 'group', 'last_attended_at')
+    search_fields = (
+        'client__full_name', 'client__phone_number', 'group__course__name',
+        'absence_reason', 'operator_note',
+    )
+    autocomplete_fields = ('client', 'group')
+    readonly_fields = (
+        'payment_status_readonly', 'last_attended_at', 'created_by',
+        'created_at', 'updated_at',
+    )
+    fieldsets = (
+        (None, {'fields': ('client', 'group', 'status', 'payment_status_readonly')}),
+        (_("Davomat"), {'fields': ('last_attended_at', 'absence_reason', 'operator_note')}),
+        (_("Arxiv ma'lumotlari"), {
+            'fields': ('created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',),
+        }),
+    )
+    date_hierarchy = 'last_attended_at'
+    ordering = ('-updated_at', '-id')
+
+    def get_queryset(self, request):
+        qs = _with_attendance_payment_status(
+            super().get_queryset(request).select_related(
+            'client__operator', 'group__course', 'created_by',
+            ).prefetch_related('lessons')
+        )
+        if _is_plain_operator(request):
+            qs = qs.filter(client__operator=request.user.operator)
+        return qs
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'client' and _is_plain_operator(request):
+            kwargs['queryset'] = Client.objects.filter(operator=request.user.operator)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        if not obj.pk:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+    def save_formset(self, request, form, formset, change):
+        instances = formset.save(commit=False)
+        for deleted in formset.deleted_objects:
+            deleted.delete()
+        for instance in instances:
+            if isinstance(instance, AttendanceLesson) and not instance.marked_by_id:
+                instance.marked_by = request.user
+            instance.save()
+        formset.save_m2m()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @display(description=_("Mijoz"))
+    def client_link(self, obj):
+        return format_html(
+            '<a href="{}" class="text-primary-600 dark:text-primary-400 hover:underline">{}</a>',
+            reverse('admin:main_client_detail', args=[obj.client_id]),
+            obj.client.full_name,
+        )
+
+    @display(description=_("Kurs"))
+    def course_name(self, obj):
+        return obj.group.course.name
+
+    @display(
+        description=_("Davomat holati"),
+        label={
+            _("Kursda qatnashyapti"): "success",
+            _("Qisman qatnashdi"): "warning",
+            _("Birinchi kun keldi, keyin kelmadi"): "danger",
+            _("Umuman kelmadi"): "danger",
+            _("Kursni yakunladi"): "info",
+        },
+    )
+    def status_badge(self, obj):
+        return obj.get_status_display()
+
+    @display(
+        description=_("To'lov holati"),
+        label={
+            _("To'langan"): "success",
+            _("Qisman to'langan"): "warning",
+            _("Tasdiq kutilmoqda"): "info",
+            _("To'lanmagan"): "danger",
+        },
+    )
+    def payment_badge(self, obj):
+        return obj.payment_status_display
+
+    @display(description=_("Qatnashgan darslar"))
+    def lessons_count(self, obj):
+        return _("%(count)s ta") % {'count': obj.attended_lessons_count}
+
+    @display(description=_("To'lov holati"))
+    def payment_status_readonly(self, obj):
+        return obj.payment_status_display if obj else _("Mijoz va guruh tanlangandan keyin aniqlanadi")
 
 
 @admin.register(Discount)
@@ -682,6 +1033,8 @@ class TransactionAdmin(ModelAdmin):
         return self.transaction_detail_view(request, object_id)
 
     def transaction_detail_view(self, request, object_id):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
         obj = self.get_object(request, object_id)
         if obj is None:
             self.message_user(request, _("To'lov topilmadi."), level=messages.ERROR)
@@ -703,6 +1056,9 @@ class TransactionAdmin(ModelAdmin):
             "refund_url": reverse(
                 "admin:main_transaction_refund_transaction_detail", args=[obj.pk]
             ),
+            "reject_url": reverse(
+                "admin:main_transaction_reject_transaction_detail", args=[obj.pk]
+            ),
             "receive_payment_url": reverse(
                 "admin:main_transaction_receive_payment_detail", args=[obj.pk]
             ),
@@ -712,7 +1068,16 @@ class TransactionAdmin(ModelAdmin):
                 and not obj.is_confirmed
                 and not obj.is_refunded
             ),
-            "can_refund": self.has_refund_permission(request, obj) and not obj.is_refunded,
+            "can_reject": (
+                self.has_reject_permission(request, obj)
+                and not obj.is_confirmed
+                and not obj.is_refunded
+            ),
+            "can_refund": (
+                self.has_refund_permission(request, obj)
+                and obj.is_confirmed
+                and not obj.is_refunded
+            ),
             "can_receive_payment": (
                 self.has_receive_payment_permission(request, obj)
                 and summary["can_receive_payment"]
@@ -772,8 +1137,17 @@ class TransactionAdmin(ModelAdmin):
 
         return super().changelist_view(request, extra_context=extra_context)
 
-    actions_row = ('confirm_transaction', 'refund_transaction')
-    actions_detail = ('confirm_transaction_detail', 'refund_transaction_detail', 'receive_payment_detail')
+    actions_row = ('confirm_transaction', 'reject_transaction', 'refund_transaction')
+    actions_detail = (
+        'confirm_transaction_detail', 'reject_transaction_detail',
+        'refund_transaction_detail', 'receive_payment_detail',
+    )
+
+    def get_list_display(self, request):
+        columns = tuple(super().get_list_display(request))
+        if request.user.is_superuser and 'review_actions' not in columns:
+            return columns + ('review_actions',)
+        return columns
 
     fieldsets = (
         (None, {
@@ -1096,6 +1470,28 @@ class TransactionAdmin(ModelAdmin):
     def refunded_badge(self, obj):
         return _("Ha") if obj.is_refunded else _("Yo'q")
 
+    @display(description=_("Amallar"))
+    def review_actions(self, obj):
+        if obj.is_refunded:
+            return _("Qaytarilgan") if obj.is_confirmed else _("Rad etilgan")
+        if obj.is_confirmed:
+            return _("Tasdiqlangan")
+        approve_url = reverse(
+            'admin:main_transaction_confirm_transaction', args=[obj.pk]
+        )
+        reject_url = reverse(
+            'admin:main_transaction_reject_transaction', args=[obj.pk]
+        )
+        return format_html(
+            '<div style="display:flex;gap:.5rem;white-space:nowrap">'
+            '<a href="{}" style="background:#0f766e;color:white;padding:.45rem .7rem;'
+            'border-radius:.375rem;font-weight:600">✓ {}</a>'
+            '<a href="{}" style="background:#dc2626;color:white;padding:.45rem .7rem;'
+            'border-radius:.375rem;font-weight:600">✕ {}</a>'
+            '</div>',
+            approve_url, _("Tasdiqlash"), reject_url, _("Rad etish"),
+        )
+
     # ---- Tasdiqlash (faqat admin) ----
     def has_confirm_permission(self, request, obj=None):
         return request.user.is_superuser
@@ -1239,6 +1635,67 @@ class TransactionAdmin(ModelAdmin):
     def confirm_transaction_detail(self, request, object_id):
         return self._confirm_response(request, object_id, detail=True)
 
+    # ---- Rad etish (hali tasdiqlanmagan asosiy to'lov) ----
+    def has_reject_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def _reject(self, request, object_id):
+        transaction = self.get_object(request, object_id)
+        if transaction is None:
+            self.message_user(request, _("To'lov topilmadi."), level=messages.ERROR)
+            return
+        if transaction.is_confirmed:
+            self.message_user(
+                request, _("Tasdiqlangan to'lovni rad etib bo'lmaydi; uni qaytarish mumkin."),
+                level=messages.WARNING,
+            )
+            return
+        if transaction.is_refunded:
+            self.message_user(request, _("Bu to'lov allaqachon rad etilgan."), level=messages.WARNING)
+            return
+        transaction.is_refunded = True
+        transaction.refunded_at = timezone.now().date()
+        transaction.save(update_fields=['is_refunded', 'refunded_at'])
+        self.message_user(request, _("To'lov rad etildi."), level=messages.SUCCESS)
+
+    def _reject_response(self, request, object_id, detail=False):
+        transaction = self.get_object(request, object_id)
+        cancel_url = self._confirmation_cancel_url(request, object_id, detail=detail)
+        if transaction is None:
+            self.message_user(request, _("To'lov topilmadi."), level=messages.ERROR)
+            return redirect('admin:main_transaction_changelist')
+        if request.method != 'POST':
+            if transaction.is_confirmed or transaction.is_refunded:
+                self.message_user(
+                    request, _("Bu to'lovni rad etib bo'lmaydi."), level=messages.WARNING,
+                )
+                return redirect(cancel_url)
+            return self._render_transaction_confirmation(
+                request,
+                transaction,
+                "admin/main/transaction/refund_confirm.html",
+                _("To'lovni rad etish"),
+                _("Rad etish"),
+                cancel_url,
+                warning=_("Rad etilgan to'lov qarz va hisobotlarda hisobga olinmaydi."),
+            )
+        self._reject(request, object_id)
+        return redirect(self._safe_redirect_url(request, request.POST.get('next'), cancel_url))
+
+    @action(
+        description=_("Rad etish"), url_path="reject-row",
+        permissions=["reject"], variant=ActionVariant.DANGER,
+    )
+    def reject_transaction(self, request, object_id):
+        return self._reject_response(request, object_id, detail=False)
+
+    @action(
+        description=_("Rad etish"), url_path="reject-detail",
+        permissions=["reject"], variant=ActionVariant.DANGER,
+    )
+    def reject_transaction_detail(self, request, object_id):
+        return self._reject_response(request, object_id, detail=True)
+
     # ---- Qaytarish ----
     def has_refund_permission(self, request, obj=None):
         return request.user.is_superuser
@@ -1317,6 +1774,12 @@ class SubTransactionAdmin(ModelAdmin):
     ordering = ('-received_at', '-id')
     actions_row = ('approve_sub_transaction', 'reject_sub_transaction')
     actions_detail = ('approve_sub_transaction_detail', 'reject_sub_transaction_detail')
+
+    def get_list_display(self, request):
+        columns = tuple(super().get_list_display(request))
+        if request.user.is_superuser and 'review_actions' not in columns:
+            return columns + ('review_actions',)
+        return columns
 
     readonly_fields = (
         'transaction', 'clients_display', 'amount', 'payment_method', 'receipt_preview',
@@ -1406,6 +1869,26 @@ class SubTransactionAdmin(ModelAdmin):
     def status_badge(self, obj):
         return obj.get_status_display()
 
+    @display(description=_("Amallar"))
+    def review_actions(self, obj):
+        if obj.status != SubTransaction.STATUS_PENDING:
+            return obj.get_status_display()
+        approve_url = reverse(
+            'admin:main_subtransaction_approve_sub_transaction', args=[obj.pk]
+        )
+        reject_url = reverse(
+            'admin:main_subtransaction_reject_sub_transaction', args=[obj.pk]
+        )
+        return format_html(
+            '<div style="display:flex;gap:.5rem;white-space:nowrap">'
+            '<a href="{}" style="background:#0f766e;color:white;padding:.45rem .7rem;'
+            'border-radius:.375rem;font-weight:600">✓ {}</a>'
+            '<a href="{}" style="background:#dc2626;color:white;padding:.45rem .7rem;'
+            'border-radius:.375rem;font-weight:600">✕ {}</a>'
+            '</div>',
+            approve_url, _("Tasdiqlash"), reject_url, _("Rad etish"),
+        )
+
     # ---- Tasdiqlash / rad etish ----
     def _review_cancel_url(self, request, object_id, detail=False):
         fallback = (
@@ -1455,6 +1938,25 @@ class SubTransactionAdmin(ModelAdmin):
         note = form.cleaned_data['note'] if form.is_valid() else ''
         ok, message = _review_sub_transaction(obj, request.user, approve, note=note)
         self.message_user(request, message, level=messages.SUCCESS if ok else messages.WARNING)
+        if ok and approve:
+            obj.refresh_from_db()
+            try:
+                sent, detail = send_payment_qr(obj.transaction, sub_transaction=obj)
+            except TelegramNotConfigured as exc:
+                self.message_user(request, str(exc), level=messages.WARNING)
+            except Exception as exc:
+                self.message_user(
+                    request,
+                    _("Telegramga yuborishda xatolik: %s") % exc,
+                    level=messages.WARNING,
+                )
+            else:
+                self.message_user(
+                    request,
+                    _("QR kod Telegram guruhiga yuborildi.") if sent
+                    else _("QR kod yuborilmadi: %s") % detail,
+                    level=messages.SUCCESS if sent else messages.WARNING,
+                )
 
         redirect_to = request.POST.get('next') or cancel_url
         if not url_has_allowed_host_and_scheme(

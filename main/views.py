@@ -4,7 +4,8 @@ from urllib.parse import parse_qs, urlparse
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import admin
-from .models import Operator, Transaction, TransactionClient, Client, Group
+from .models import Expense, Operator, RoleConfiguration, Transaction, TransactionClient, Client, Group
+from .permissions import is_operator, is_owner, permission_required
 from django.db.models import Sum, Count
 from datetime import datetime
 
@@ -125,7 +126,8 @@ def dashboard_callback(request, context):
     operator_filter = request.GET.get('operator_id')
 
     # Restrict view for plain operators
-    is_plain_op = not request.user.is_superuser and hasattr(request.user, 'operator')
+    is_plain_op = is_operator(request.user)
+    owner_view = is_owner(request.user)
 
     all_transactions = Transaction.objects.filter(is_refunded=False)
     if is_plain_op:
@@ -168,7 +170,10 @@ def dashboard_callback(request, context):
     context.update({
         "is_plain_operator": is_plain_op,
         "total_income": confirmed_transactions.aggregate(total=Sum('amount'))['total'] or 0,
-        "total_clients": Client.objects.count(),
+        "total_clients": (
+            Client.objects.filter(operator=request.user.operator).count()
+            if is_plain_op else Client.objects.count()
+        ),
         "total_groups": Group.objects.filter(is_active=True).count(),
         "transactions_count": confirmed_transactions.count(),
         "pending_count": pending_transactions.count(),
@@ -176,7 +181,11 @@ def dashboard_callback(request, context):
             total=Sum('debt')
         )['total'] or 0,
         "recent_transactions": all_transactions.prefetch_related('clients').select_related('group').order_by('-date', '-id')[:6],
-        "operators": Operator.objects.all() if not is_plain_op else Operator.objects.filter(id=request.user.operator.id),
+        "operators": (
+            Operator.objects.filter(role=RoleConfiguration.ROLE_OPERATOR)
+            if not is_plain_op else Operator.objects.filter(id=request.user.operator.id)
+        ),
+        "is_owner_view": owner_view,
         "months": [
             (1, "Yanvar", monthly_counts.get(1, 0)),
             (2, "Fevral", monthly_counts.get(2, 0)),
@@ -232,14 +241,15 @@ def calculate_salary_percentage(total_amount):
 
 
 @staff_member_required
+@permission_required('main.access_salary_report')
 def salaries(request):
     month_filter = request.GET.get('month')
     year_filter = request.GET.get('year')
     operator_filter = request.GET.get('operator_id')
 
-    is_plain_op = not request.user.is_superuser and hasattr(request.user, 'operator')
+    is_plain_op = is_operator(request.user)
 
-    operators = Operator.objects.all()
+    operators = Operator.objects.filter(role=RoleConfiguration.ROLE_OPERATOR)
     if is_plain_op:
         operators = operators.filter(id=request.user.operator.id)
         filtered_operators = operators
@@ -346,6 +356,7 @@ def salaries(request):
 
 
 @staff_member_required
+@permission_required('main.access_qr_scanner')
 def qr_verify(request):
     """QR skaner orqali mijozni tekshirish sahifasi.
 
@@ -362,7 +373,7 @@ def qr_verify(request):
     searched = bool(code)
     invalid_code = False
 
-    is_plain_op = not request.user.is_superuser and hasattr(request.user, 'operator')
+    is_plain_op = is_operator(request.user)
 
     if code:
         # QR odatda UUID ni saqlaydi. Link skaner qilinganda querystringdagi
@@ -424,3 +435,60 @@ def qr_verify(request):
     context.update(admin.site.each_context(request))
 
     return render(request, 'admin/qr_verify.html', context)
+
+
+@staff_member_required
+@permission_required('main.access_cashflow')
+def cashflow(request):
+    """Tasdiqlangan tushumlar, kiritilgan xarajatlar va joriy kassa balansi."""
+    now = datetime.now()
+    try:
+        selected_month = int(request.GET.get('month') or now.month)
+        selected_year = int(request.GET.get('year') or now.year)
+        if selected_month not in range(1, 13):
+            raise ValueError
+    except (TypeError, ValueError):
+        selected_month, selected_year = now.month, now.year
+
+    incomes = Transaction.objects.filter(is_confirmed=True, is_refunded=False)
+    expenses = Expense.objects.all()
+    period_incomes = incomes.filter(date__year=selected_year, date__month=selected_month)
+    period_expenses = expenses.filter(date__year=selected_year, date__month=selected_month)
+
+    total_income = incomes.aggregate(total=Sum('amount'))['total'] or 0
+    total_expense = expenses.aggregate(total=Sum('amount'))['total'] or 0
+    period_income = period_incomes.aggregate(total=Sum('amount'))['total'] or 0
+    period_expense = period_expenses.aggregate(total=Sum('amount'))['total'] or 0
+
+    available_years = sorted(set(
+        incomes.annotate(year=ExtractYear('date')).values_list('year', flat=True).distinct()
+    ) | set(
+        expenses.annotate(year=ExtractYear('date')).values_list('year', flat=True).distinct()
+    ) | {selected_year}, reverse=True)
+
+    context = {
+        'title': "Kirim-chiqim va balans",
+        'balance': total_income - total_expense,
+        'total_income': total_income,
+        'total_expense': total_expense,
+        'period_income': period_income,
+        'period_expense': period_expense,
+        'period_net': period_income - period_expense,
+        'income_count': period_incomes.count(),
+        'expense_count': period_expenses.count(),
+        'recent_incomes': period_incomes.prefetch_related('clients').select_related(
+            'operator', 'group__course'
+        ).order_by('-date', '-id')[:12],
+        'recent_expenses': period_expenses.select_related('created_by').order_by('-date', '-id')[:12],
+        'selected_month': selected_month,
+        'selected_year': selected_year,
+        'available_years': available_years,
+        'months': [
+            (1, "Yanvar"), (2, "Fevral"), (3, "Mart"), (4, "Aprel"),
+            (5, "May"), (6, "Iyun"), (7, "Iyul"), (8, "Avgust"),
+            (9, "Sentabr"), (10, "Oktabr"), (11, "Noyabr"), (12, "Dekabr"),
+        ],
+        'can_add_expense': request.user.has_perm('main.add_expense'),
+    }
+    context.update(admin.site.each_context(request))
+    return render(request, 'admin/cashflow.html', context)

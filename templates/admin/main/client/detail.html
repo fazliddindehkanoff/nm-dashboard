@@ -64,6 +64,78 @@
         </div>
     </div>
 
+    <!-- Davomat kartalari: mijoz + guruh bo'yicha o'chmaydigan tarix -->
+    <section class="flex flex-col gap-4" aria-labelledby="attendance-title">
+        <div class="flex items-center justify-between gap-4">
+            <div>
+                <h2 id="attendance-title" class="font-semibold text-[15px] text-important">{% trans "Davomat va kursdagi holati" %}</h2>
+                <p class="text-sm text-base-500 mt-1">{% trans "Har bir guruh bo'yicha qatnashish tarixi va qayta bog'lanish izohlari." %}</p>
+            </div>
+            <span class="bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-full text-xs">{{ attendance_records|length }}</span>
+        </div>
+
+        {% for record in attendance_records %}
+        <article class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-800 rounded-default shadow-xs overflow-hidden">
+            <div class="border-b border-base-200 dark:border-base-800 px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                <div>
+                    <div class="font-semibold text-font-important-light dark:text-font-important-dark">{{ record.group.course.name }}</div>
+                    <div class="text-xs text-base-500 mt-0.5">{{ record.group }}</div>
+                </div>
+                <div class="sm:ml-auto flex flex-wrap items-center gap-2">
+                    <span class="font-medium px-2 py-1 rounded-default text-xs {% if record.status == 'active' %}bg-primary-50 text-primary-700 dark:bg-primary-950 dark:text-primary-300{% elif record.status == 'completed' %}bg-base-900 text-white dark:bg-base-100 dark:text-base-900{% else %}bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300{% endif %}">
+                        {{ record.get_status_display }}
+                    </span>
+                    <span class="border border-base-200 dark:border-base-700 text-base-600 dark:text-base-300 font-medium px-2 py-1 rounded-default text-xs">
+                        {{ record.payment_status_display }}
+                    </span>
+                    {% if can_change_attendance %}
+                    <a href="{% url 'admin:main_attendancerecord_change' record.pk %}" class="inline-flex items-center gap-1 text-primary-600 dark:text-primary-400 text-xs font-medium hover:underline">
+                        <span class="material-symbols-outlined text-[16px]" aria-hidden="true">edit</span>
+                        {% trans "Yangilash" %}
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-base-200 dark:divide-base-800">
+                <div class="p-5">
+                    <p class="text-xs uppercase tracking-wider text-base-500 mb-3">{% trans "Qatnashgan darslar" %}</p>
+                    <div class="flex flex-wrap gap-2">
+                        {% for lesson in record.lessons.all %}
+                        <span class="inline-flex items-center gap-1 bg-primary-50 text-primary-700 dark:bg-primary-950 dark:text-primary-300 px-2 py-1 rounded-default text-xs font-medium" title="{{ lesson.note|default:'' }}">
+                            <span class="material-symbols-outlined text-[14px]" aria-hidden="true">check</span>
+                            {{ lesson.date|date:"d.m.Y" }}
+                        </span>
+                        {% empty %}
+                        <span class="text-sm text-base-500">{% trans "Hali darsga kelmagan" %}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="p-5">
+                    <p class="text-xs uppercase tracking-wider text-base-500 mb-2">{% trans "Oxirgi kelgan sana" %}</p>
+                    <div class="font-medium text-font-important-light dark:text-font-important-dark">{{ record.last_attended_at|date:"d.m.Y"|default:"—" }}</div>
+                    <p class="text-xs text-base-500 mt-3">{{ record.attended_lessons_count }} {% trans "ta dars qayd etilgan" %}</p>
+                </div>
+                <div class="p-5 flex flex-col gap-4">
+                    <div>
+                        <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Kelmaslik sababi" %}</p>
+                        <p class="text-sm text-font-important-light dark:text-font-important-dark">{{ record.absence_reason|default:"—" }}</p>
+                    </div>
+                    <div>
+                        <p class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Operator izohi" %}</p>
+                        <p class="text-sm text-font-important-light dark:text-font-important-dark">{{ record.operator_note|default:"—" }}</p>
+                    </div>
+                </div>
+            </div>
+        </article>
+        {% empty %}
+        <div class="bg-white dark:bg-base-900 border border-dashed border-base-300 dark:border-base-700 rounded-default p-8 text-center">
+            <span class="material-symbols-outlined text-base-400 text-3xl" aria-hidden="true">event_busy</span>
+            <p class="text-sm text-base-500 mt-2">{% trans "Bu mijoz hali biror guruhga biriktirilmagan." %}</p>
+        </div>
+        {% endfor %}
+    </section>
+
     <!-- To'lovlar jadvali -->
     <div class="bg-white block flex flex-col grow overflow-hidden relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
         <div class="border-b border-base-200 flex flex-row items-center justify-between py-4 px-6 dark:border-base-800">

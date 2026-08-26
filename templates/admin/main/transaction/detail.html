@@ -31,6 +31,13 @@
                 {% trans "Tasdiqlash" %}
             </a>
             {% endif %}
+            {% if can_reject %}
+            <a href="{{ reject_url }}"
+               class="min-h-11 inline-flex items-center gap-2 text-white font-medium px-4 py-2 rounded-default text-sm transition-colors" style="background:#dc2626">
+                <span class="material-symbols-outlined text-[18px]" aria-hidden="true">block</span>
+                {% trans "Rad etish" %}
+            </a>
+            {% endif %}
             {% if can_receive_payment %}
             <a href="{{ receive_payment_url }}"
                class="min-h-11 inline-flex items-center gap-2 border border-base-300 text-base-700 dark:border-base-700 dark:text-base-300 font-medium px-4 py-2 rounded-default text-sm hover:bg-base-100 dark:hover:bg-base-800 transition-colors">
@@ -64,7 +71,8 @@
             </h2>
             {% if transaction.is_refunded %}
             <span class="inline-flex items-center gap-1 rounded-full bg-base-100 dark:bg-base-800 px-2.5 py-1 text-xs font-medium text-base-700 dark:text-base-300">
-                <span class="material-symbols-outlined text-[15px]" aria-hidden="true">undo</span>{% trans "Qaytarilgan" %}
+                <span class="material-symbols-outlined text-[15px]" aria-hidden="true">{% if transaction.is_confirmed %}undo{% else %}block{% endif %}</span>
+                {% if transaction.is_confirmed %}{% trans "Qaytarilgan" %}{% else %}{% trans "Rad etilgan" %}{% endif %}
             </span>
             {% elif transaction.is_confirmed %}
             <span class="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium" style="background:rgba(15,118,110,.12);color:#0f766e">
@@ -140,6 +148,21 @@
             </div>
         </dl>
     </section>
+
+    {% if transaction.screenshot %}
+    <section class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-800 rounded-default shadow-xs overflow-hidden" aria-labelledby="receipt-preview-title">
+        <div class="px-4 sm:px-6 py-4 border-b border-base-200 dark:border-base-800">
+            <h2 id="receipt-preview-title" class="font-semibold text-font-important-light dark:text-font-important-dark mb-0">{% trans "Chek rasmi" %}</h2>
+        </div>
+        <div class="p-4 sm:p-6">
+            <a href="{{ transaction.screenshot.url }}" target="_blank" rel="noopener" class="inline-block">
+                <img src="{{ transaction.screenshot.url }}" alt="{% trans 'To\'lov cheki' %}"
+                     class="rounded-default border border-base-200 dark:border-base-800 object-contain"
+                     style="max-height:520px;max-width:100%;">
+            </a>
+        </div>
+    </section>
+    {% endif %}
 
     {% include "admin/main/transaction/subtransactions_table.html" with original=transaction embedded=True %}
 </div>

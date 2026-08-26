@@ -70,6 +70,31 @@
         </div>
     </div>
 
+    <!-- Guruh ish maydoni: to'lovlar, davomat va kelajakdagi anketa -->
+    <nav class="border-b border-base-200 dark:border-base-800 flex items-center gap-1 overflow-x-auto" aria-label="Guruh bo'limlari">
+        <a href="?tab=payments"
+           class="px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors {% if active_tab == 'payments' %}border-primary-600 text-primary-700 dark:text-primary-400{% else %}border-transparent text-base-500 hover:text-base-700 dark:hover:text-base-300{% endif %}"
+           {% if active_tab == 'payments' %}aria-current="page"{% endif %}>
+            <span class="inline-flex items-center gap-2"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">payments</span>{% trans "To'lovlar" %}</span>
+        </a>
+        <a href="?tab=attendance"
+           class="px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors {% if active_tab == 'attendance' %}border-primary-600 text-primary-700 dark:text-primary-400{% else %}border-transparent text-base-500 hover:text-base-700 dark:hover:text-base-300{% endif %}"
+           {% if active_tab == 'attendance' %}aria-current="page"{% endif %}>
+            <span class="inline-flex items-center gap-2"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">fact_check</span>{% trans "Davomat" %}</span>
+        </a>
+        <a href="?tab=anketa"
+           class="px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors {% if active_tab == 'anketa' %}border-primary-600 text-primary-700 dark:text-primary-400{% else %}border-transparent text-base-500 hover:text-base-700 dark:hover:text-base-300{% endif %}"
+           {% if active_tab == 'anketa' %}aria-current="page"{% endif %}>
+            <span class="inline-flex items-center gap-2"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">assignment</span>{% trans "Anketa" %}</span>
+        </a>
+        <a href="?tab=statistics"
+           class="px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors {% if active_tab == 'statistics' %}border-primary-600 text-primary-700 dark:text-primary-400{% else %}border-transparent text-base-500 hover:text-base-700 dark:hover:text-base-300{% endif %}"
+           {% if active_tab == 'statistics' %}aria-current="page"{% endif %}>
+            <span class="inline-flex items-center gap-2"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">bar_chart</span>{% trans "Statistika" %}</span>
+        </a>
+    </nav>
+
+    {% if active_tab == 'payments' %}
     <!-- To'lovlar jadvali -->
     <div class="bg-white block flex flex-col grow overflow-hidden relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
         <div class="border-b border-base-200 flex flex-row items-center justify-between py-4 px-6 dark:border-base-800">
@@ -117,5 +142,234 @@
             </table>
         </div>
     </div>
+    {% elif active_tab == 'attendance' %}
+    <style>
+        [data-status="active"] { --attendance-dot: #16a34a; }
+        [data-status="partial"] { --attendance-dot: #d97706; }
+        [data-status="first_day_only"] { --attendance-dot: #ea580c; }
+        [data-status="never_attended"] { --attendance-dot: #dc2626; }
+        [data-status="completed"] { --attendance-dot: #2563eb; }
+        .attendance-status-dot {
+            background: var(--attendance-dot);
+            border-radius: 999px;
+            flex: 0 0 8px;
+            height: 8px;
+            width: 8px;
+        }
+        .attendance-table {
+            min-width: 980px;
+        }
+        .attendance-status-control {
+            align-items: center;
+            background: #fff;
+            border: 1px solid #dbe2ea;
+            border-radius: 8px;
+            color: #334155;
+            display: grid;
+            gap: 9px;
+            grid-template-columns: 8px minmax(0, 1fr);
+            min-width: 280px;
+            padding: 0 11px;
+            transition: border-color 140ms ease, box-shadow 140ms ease;
+        }
+        .attendance-status-control:hover {
+            border-color: #94a3b8;
+        }
+        .attendance-status-control:focus-within {
+            border-color: #0f766e;
+            box-shadow: 0 0 0 3px rgba(15, 118, 110, .12);
+            outline: none;
+        }
+        .attendance-status-control select {
+            background: transparent;
+            border: 0;
+            color: inherit;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            height: 38px;
+            min-width: 0;
+            outline: none;
+            padding: 0 30px 0 0;
+            width: 100%;
+        }
+        .attendance-status-control select:disabled {
+            cursor: wait;
+            opacity: .72;
+        }
+        .attendance-status-control option {
+            background: #fff;
+            color: #111827;
+        }
+        .dark .attendance-status-control option {
+            background: #111827;
+            color: #f3f4f6;
+        }
+        .dark .attendance-status-control {
+            background: #111827;
+            border-color: #374151;
+            color: #e5e7eb;
+        }
+        .dark .attendance-status-control:hover {
+            border-color: #64748b;
+        }
+        .dark .attendance-status-control:focus-within {
+            border-color: #2dd4bf;
+            box-shadow: 0 0 0 3px rgba(45, 212, 191, .12);
+        }
+        .attendance-save-state {
+            align-items: center;
+            display: inline-flex;
+            font-size: 11px;
+            font-weight: 500;
+            gap: 4px;
+            min-height: 16px;
+            padding-left: 2px;
+            white-space: nowrap;
+        }
+        .attendance-save-state[data-state="saving"] { color: #64748b; }
+        .attendance-save-state[data-state="saved"] { color: #047857; }
+        .attendance-save-state[data-state="error"] { color: #b91c1c; }
+        .dark .attendance-save-state[data-state="saving"] { color: #94a3b8; }
+        .dark .attendance-save-state[data-state="saved"] { color: #6ee7b7; }
+        .dark .attendance-save-state[data-state="error"] { color: #fca5a5; }
+    </style>
+    <div class="bg-white block flex flex-col grow overflow-hidden relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
+        <div class="border-b border-base-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-4 px-6 dark:border-base-800">
+            <div>
+                <h2 class="font-semibold text-[15px] text-important">{% trans "Guruh davomati" %}</h2>
+                <p class="text-xs text-base-500 mt-1">{% trans "Guruhdagi mijozlar va ularning joriy holati" %}</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="inline-flex items-center gap-1.5 text-xs text-base-500">
+                    <span class="material-symbols-outlined text-primary-600 dark:text-primary-400" style="font-size: 16px;" aria-hidden="true">cloud_done</span>
+                    {% trans "Avtomatik saqlanadi" %}
+                </span>
+                <span class="bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-full text-xs">{{ attendance_records|length }} {% trans "mijoz" %}</span>
+            </div>
+        </div>
+
+        <form class="hidden" aria-hidden="true">{% csrf_token %}</form>
+        <div class="grow relative overflow-x-auto">
+            <table class="attendance-table w-full text-sm">
+                <thead>
+                    <tr class="border-b border-base-200 dark:border-base-800 text-left text-xs uppercase text-base-500">
+                        <th class="py-3 px-6 font-medium">{% trans "Mijoz" %}</th>
+                        <th class="py-3 px-6 font-medium">{% trans "Davomat holati" %}</th>
+                        <th class="py-3 px-6 font-medium">{% trans "To'lov holati" %}</th>
+                        <th class="py-3 px-6 font-medium text-center">{% trans "Darslar" %}</th>
+                        <th class="py-3 px-6 font-medium">{% trans "Oxirgi kelgan sana" %}</th>
+                        <th class="py-3 px-6 font-medium">{% trans "Operator" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in attendance_records %}
+                    <tr class="border-b border-base-200 dark:border-base-800 last:border-0 hover:bg-base-50 dark:hover:bg-base-800/50" data-attendance-row data-status="{{ record.status }}">
+                        <td class="py-3 px-6">
+                            <a href="{% url 'admin:main_client_detail' record.client_id %}" class="font-medium text-font-important-light dark:text-font-important-dark hover:underline">{{ record.client.full_name }}</a>
+                            <div class="text-xs text-base-500 mt-0.5">{{ record.client.phone_number|default:"—" }}</div>
+                        </td>
+                        <td class="py-3 px-6">
+                            <div class="flex flex-col items-start gap-1.5">
+                                <div class="attendance-status-control" data-attendance-status-shell data-status="{{ record.status }}">
+                                    <span class="attendance-status-dot" aria-hidden="true"></span>
+                                    <select
+                                        data-attendance-status
+                                        data-save-url="{% url 'admin:main_group_attendance_status' group.pk record.pk %}"
+                                        data-previous="{{ record.status }}"
+                                        aria-label="{{ record.client.full_name }} — {% trans 'Davomat holati' %}"
+                                        {% if not can_change_attendance %}disabled{% endif %}>
+                                        {% for status_value, status_label in attendance_statuses %}
+                                        <option value="{{ status_value }}" {% if record.status == status_value %}selected{% endif %}>{{ status_label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <span data-save-state class="attendance-save-state" aria-live="polite"></span>
+                            </div>
+                        </td>
+                        <td class="py-3 px-6">
+                            <span class="border border-base-200 dark:border-base-700 text-base-600 dark:text-base-300 font-medium px-2 py-1 rounded-default text-xs whitespace-nowrap">{{ record.payment_status_display }}</span>
+                        </td>
+                        <td class="py-3 px-6 text-center font-medium text-font-important-light dark:text-font-important-dark">{{ record.attended_lessons_count }}</td>
+                        <td class="py-3 px-6 text-base-500 whitespace-nowrap">{{ record.last_attended_at|date:"d.m.Y"|default:"—" }}</td>
+                        <td class="py-3 px-6 text-base-500">{{ record.client.operator.full_name|default:"—" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center py-12 px-6">
+                            <span class="material-symbols-outlined text-base-400 text-3xl" aria-hidden="true">group_off</span>
+                            <p class="text-sm text-base-500 mt-2">{% trans "Bu guruhga hali mijoz biriktirilmagan." %}</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% elif active_tab == 'anketa' %}
+    <div class="bg-white dark:bg-base-900 border border-dashed border-base-300 dark:border-base-700 rounded-default min-h-64 flex flex-col items-center justify-center text-center p-8">
+        <span class="material-symbols-outlined text-base-400 text-4xl" aria-hidden="true">assignment</span>
+        <h2 class="font-semibold text-font-important-light dark:text-font-important-dark mt-3">{% trans "Anketa" %}</h2>
+        <p class="text-sm text-base-500 mt-1">{% trans "Bu bo'lim hozircha bo'sh." %}</p>
+    </div>
+    {% else %}
+    <div class="bg-white dark:bg-base-900 border border-dashed border-base-300 dark:border-base-700 rounded-default min-h-64 flex flex-col items-center justify-center text-center p-8">
+        <span class="material-symbols-outlined text-base-400 text-4xl" aria-hidden="true">bar_chart</span>
+        <h2 class="font-semibold text-font-important-light dark:text-font-important-dark mt-3">{% trans "Statistika" %}</h2>
+        <p class="text-sm text-base-500 mt-1">{% trans "Statistika bo'limi hozircha bo'sh." %}</p>
+    </div>
+    {% endif %}
 </div>
+
+{% if active_tab == 'attendance' and can_change_attendance %}
+<script>
+(function () {
+    const csrfInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+    if (!csrfInput) return;
+
+    document.querySelectorAll('[data-attendance-status]').forEach(function (select) {
+        select.addEventListener('change', async function () {
+            const previous = select.dataset.previous;
+            const row = select.closest('[data-attendance-row]');
+            const shell = select.closest('[data-attendance-status-shell]');
+            const state = row.querySelector('[data-save-state]');
+            const selected = select.value;
+            row.dataset.status = selected;
+            shell.dataset.status = selected;
+            state.textContent = "{% trans 'Saqlanmoqda…' %}";
+            state.dataset.state = 'saving';
+            select.disabled = true;
+
+            try {
+                const body = new URLSearchParams({status: select.value});
+                const response = await fetch(select.dataset.saveUrl, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfInput.value,
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+                    },
+                    body: body.toString()
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || "{% trans 'Saqlashda xatolik.' %}");
+                select.dataset.previous = data.status;
+                row.dataset.status = data.status;
+                shell.dataset.status = data.status;
+                state.textContent = "✓ {% trans 'Saqlandi' %}";
+                state.dataset.state = 'saved';
+            } catch (error) {
+                select.value = previous;
+                row.dataset.status = previous;
+                shell.dataset.status = previous;
+                state.textContent = error.message;
+                state.dataset.state = 'error';
+            } finally {
+                select.disabled = false;
+            }
+        });
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

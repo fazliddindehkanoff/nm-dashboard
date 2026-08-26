@@ -4,7 +4,44 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Permission, User
+
+
+class RoleConfiguration(models.Model):
+    """Platformadagi tizim rollari va ularga berilgan ruxsatlar matritsasi."""
+
+    ROLE_ADMIN = 'admin'
+    ROLE_OPERATOR = 'operator'
+    ROLE_OWNER = 'owner'
+    ROLE_ACCOUNTANT = 'accountant'
+    ROLE_CHOICES = (
+        (ROLE_ADMIN, _("Admin")),
+        (ROLE_OPERATOR, _("Operator / sotuvchi")),
+        (ROLE_OWNER, _("Biznes egasi / tadbirkor")),
+        (ROLE_ACCOUNTANT, _("Buxgalter / kassir")),
+    )
+
+    code = models.CharField(_("Rol"), max_length=20, choices=ROLE_CHOICES, unique=True)
+    permissions = models.ManyToManyField(
+        Permission,
+        blank=True,
+        verbose_name=_("Ochiq bo'lim va funksiyalar"),
+        help_text=_("Ushbu rol foydalana oladigan bo'lim va amallarni belgilang."),
+    )
+
+    class Meta:
+        verbose_name = _("Rol ruxsatlari")
+        verbose_name_plural = _("Rollar va ruxsatlar")
+        ordering = ("code",)
+        permissions = (
+            ("access_dashboard", "Dashboardni ko'rish"),
+            ("access_salary_report", "Maosh hisobotini ko'rish"),
+            ("access_qr_scanner", "QR skanerdan foydalanish"),
+            ("access_cashflow", "Kirim-chiqim va kassa balansini ko'rish"),
+        )
+
+    def __str__(self):
+        return self.get_code_display()
 
 class Course(models.Model):
     name = models.CharField(_("Nomi"), max_length=255)
@@ -90,16 +127,69 @@ class Client(models.Model):
         return self.full_name
 
 class Operator(models.Model):
+    ROLE_CHOICES = RoleConfiguration.ROLE_CHOICES
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name=_("Foydalanuvchi"), null=True, blank=True)
     full_name = models.CharField(_("Familiya-Ism"), max_length=255)
     phone_number = models.CharField(_("Telefon raqam"), max_length=20, null=True, blank=True)
+    role = models.CharField(
+        _("Rol"),
+        max_length=20,
+        choices=ROLE_CHOICES,
+        default=RoleConfiguration.ROLE_OPERATOR,
+    )
 
     class Meta:
-        verbose_name = _("Operator")
-        verbose_name_plural = _("Operatorlar")
+        verbose_name = _("Foydalanuvchi")
+        verbose_name_plural = _("Foydalanuvchilar")
 
     def __str__(self):
         return self.full_name
+
+
+class Expense(models.Model):
+    CATEGORY_RENT = 'rent'
+    CATEGORY_SALARY = 'salary'
+    CATEGORY_MARKETING = 'marketing'
+    CATEGORY_SUPPLIES = 'supplies'
+    CATEGORY_TAX = 'tax'
+    CATEGORY_UTILITIES = 'utilities'
+    CATEGORY_OTHER = 'other'
+    CATEGORIES = (
+        (CATEGORY_RENT, _("Ijara")),
+        (CATEGORY_SALARY, _("Maosh")),
+        (CATEGORY_MARKETING, _("Marketing")),
+        (CATEGORY_SUPPLIES, _("Xo'jalik xarajatlari")),
+        (CATEGORY_TAX, _("Soliq")),
+        (CATEGORY_UTILITIES, _("Kommunal xizmatlar")),
+        (CATEGORY_OTHER, _("Boshqa")),
+    )
+
+    date = models.DateField(_("Sana"))
+    category = models.CharField(_("Kategoriya"), max_length=20, choices=CATEGORIES)
+    amount = models.DecimalField(_("Summa"), max_digits=14, decimal_places=2)
+    description = models.CharField(_("Izoh"), max_length=500, blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name='recorded_expenses',
+        verbose_name=_("Kiritdi"),
+        editable=False,
+    )
+    created_at = models.DateTimeField(_("Kiritilgan vaqt"), auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Xarajat")
+        verbose_name_plural = _("Xarajatlar")
+        ordering = ('-date', '-id')
+
+    def clean(self):
+        super().clean()
+        if self.amount is not None and self.amount <= 0:
+            raise ValidationError({'amount': _("Xarajat summasi noldan katta bo'lishi kerak.")})
+
+    def __str__(self):
+        return f"{self.get_category_display()} — {self.amount}"
 
 
 class Discount(models.Model):
@@ -317,6 +407,162 @@ class TransactionClient(models.Model):
     @property
     def remaining_amount(self):
         return max(self.amount_due - Decimal(str(self.share_amount or 0)), Decimal(0))
+
+
+class AttendanceRecord(models.Model):
+    """Mijozning bitta guruhdagi doimiy davomat kartasi.
+
+    To'lov yoki tranzaksiya o'chirilsa ham bu yozuv saqlanadi. Shu sababli
+    mijoz va guruh PROTECT bilan bog'langan va davomat kartasi admin orqali
+    o'chirilmaydi.
+    """
+
+    STATUS_ACTIVE = 'active'
+    STATUS_PARTIAL = 'partial'
+    STATUS_FIRST_DAY_ONLY = 'first_day_only'
+    STATUS_NEVER_ATTENDED = 'never_attended'
+    STATUS_COMPLETED = 'completed'
+    STATUSES = (
+        (STATUS_ACTIVE, _("Kursda qatnashyapti")),
+        (STATUS_PARTIAL, _("Qisman qatnashdi")),
+        (STATUS_FIRST_DAY_ONLY, _("Birinchi kun keldi, keyin kelmadi")),
+        (STATUS_NEVER_ATTENDED, _("Umuman kelmadi")),
+        (STATUS_COMPLETED, _("Kursni yakunladi")),
+    )
+
+    PAYMENT_UNPAID = 'unpaid'
+    PAYMENT_PENDING = 'pending'
+    PAYMENT_PARTIAL = 'partial'
+    PAYMENT_PAID = 'paid'
+    PAYMENT_LABELS = {
+        PAYMENT_UNPAID: _("To'lanmagan"),
+        PAYMENT_PENDING: _("Tasdiq kutilmoqda"),
+        PAYMENT_PARTIAL: _("Qisman to'langan"),
+        PAYMENT_PAID: _("To'langan"),
+    }
+
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.PROTECT,
+        related_name='attendance_records',
+        verbose_name=_("Mijoz"),
+    )
+    group = models.ForeignKey(
+        Group,
+        on_delete=models.PROTECT,
+        related_name='attendance_records',
+        verbose_name=_("Guruh"),
+    )
+    status = models.CharField(
+        _("Davomat holati"),
+        max_length=20,
+        choices=STATUSES,
+        default=STATUS_ACTIVE,
+    )
+    last_attended_at = models.DateField(_("Oxirgi kelgan sana"), null=True, blank=True, editable=False)
+    absence_reason = models.TextField(
+        _("Kelmaslik sababi"),
+        blank=True,
+        help_text=_("Mijoz aytgan sabab yoki bog'lanish natijasini yozing."),
+    )
+    operator_note = models.TextField(
+        _("Operator izohi"),
+        blank=True,
+        help_text=_("Keyingi bog'lanish uchun muhim tafsilotlar."),
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_attendance_records',
+        verbose_name=_("Kartani yaratdi"),
+        editable=False,
+    )
+    created_at = models.DateTimeField(_("Yaratilgan vaqt"), auto_now_add=True)
+    updated_at = models.DateTimeField(_("Yangilangan vaqt"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("Davomat kartasi")
+        verbose_name_plural = _("Davomat / kelmagan mijozlar")
+        ordering = ('-updated_at', '-id')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('client', 'group'), name='uniq_attendance_client_group',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.client.full_name} — {self.group}"
+
+    @property
+    def attended_lessons_count(self):
+        prefetched = getattr(self, '_prefetched_objects_cache', {}).get('lessons')
+        return len(prefetched) if prefetched is not None else self.lessons.count()
+
+    def _payment_participations(self):
+        return self.client.participations.filter(
+            transaction__group=self.group,
+            transaction__is_refunded=False,
+        )
+
+    @property
+    def payment_status(self):
+        annotated_confirmed = getattr(self, '_confirmed_payment_count', None)
+        if annotated_confirmed is not None:
+            if annotated_confirmed:
+                debt = getattr(self, '_confirmed_payment_debt', None) or Decimal(0)
+                return self.PAYMENT_PARTIAL if debt > 0 else self.PAYMENT_PAID
+            if getattr(self, '_pending_payment_count', 0):
+                return self.PAYMENT_PENDING
+            return self.PAYMENT_UNPAID
+
+        participations = self._payment_participations()
+        confirmed = participations.filter(transaction__is_confirmed=True)
+        if confirmed.exists():
+            debt = confirmed.aggregate(total=models.Sum('debt'))['total'] or Decimal(0)
+            return self.PAYMENT_PARTIAL if debt > 0 else self.PAYMENT_PAID
+        if participations.filter(transaction__is_confirmed=False).exists():
+            return self.PAYMENT_PENDING
+        return self.PAYMENT_UNPAID
+
+    @property
+    def payment_status_display(self):
+        return self.PAYMENT_LABELS[self.payment_status]
+
+
+class AttendanceLesson(models.Model):
+    attendance = models.ForeignKey(
+        AttendanceRecord,
+        on_delete=models.CASCADE,
+        related_name='lessons',
+        verbose_name=_("Davomat kartasi"),
+    )
+    date = models.DateField(_("Dars sanasi"))
+    note = models.CharField(_("Dars bo'yicha izoh"), max_length=255, blank=True)
+    marked_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='marked_attendance_lessons',
+        verbose_name=_("Belgiladi"),
+        editable=False,
+    )
+    created_at = models.DateTimeField(_("Belgilangan vaqt"), auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Qatnashgan dars")
+        verbose_name_plural = _("Qatnashgan darslar")
+        ordering = ('-date', '-id')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('attendance', 'date'), name='uniq_attendance_lesson_date',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.attendance.client} — {self.date:%d.%m.%Y}"
 
 
 class SubTransaction(models.Model):
