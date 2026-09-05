@@ -7,6 +7,7 @@ from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import urlencode
 
+from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -75,6 +76,10 @@ class TelegramMiniAppTests(TestCase):
     def setUp(self):
         self.course = Course.objects.create(
             name='Sog‘lomlashtirish kursi', price=Decimal('1500000'), number_of_days=10,
+        )
+        self.group = Group.objects.create(
+            course=self.course, start_date=date(2026, 9, 10), number_of_days=10,
+            is_active=True,
         )
         self.headers = {'HTTP_X_TELEGRAM_DEMO': '1'}
 
@@ -189,6 +194,78 @@ class TelegramMiniAppTests(TestCase):
         final_bootstrap = self.client.get(reverse('main:telegram_app_bootstrap'), **self.headers)
         self.assertFalse(final_bootstrap.json()['legal']['terms_required'])
         self.assertTrue(final_bootstrap.json()['purchases'][0]['contract_accepted'])
+        self.assertEqual(final_bootstrap.json()['my_courses'][0]['assignment_status'], 'awaiting_group')
+
+    def test_catalogue_only_lists_courses_with_active_groups(self):
+        inactive_course = Course.objects.create(
+            name='Yopiq kurs', price=Decimal('900000'), number_of_days=5,
+        )
+        Group.objects.create(
+            course=inactive_course, start_date=date(2026, 10, 1), number_of_days=5,
+            is_active=False,
+        )
+
+        response = self.client.get(reverse('main:telegram_app_bootstrap'), **self.headers)
+        self.assertEqual(
+            [course['id'] for course in response.json()['courses']],
+            [self.course.id],
+        )
+        self.assertEqual(
+            response.json()['courses'][0]['active_groups'][0]['start_date'],
+            '2026-09-10',
+        )
+
+        self.post_json(reverse('main:telegram_app_accept_terms'), {
+            'accepted': True,
+            'version': TERMS_VERSION,
+        })
+        unavailable = self.post_json(reverse('main:telegram_app_create_purchase'), {
+            'course_id': inactive_course.id,
+            'purchase_type': MiniAppPurchase.TYPE_SELF,
+            'members': [],
+        })
+        self.assertEqual(unavailable.status_code, 404)
+
+    def test_bootstrap_includes_private_attendance_timeline(self):
+        self.client.get(reverse('main:telegram_app_bootstrap'), **self.headers)
+        account = TelegramUser.objects.get(telegram_id=900000001)
+        linked_client = Client.objects.create(
+            full_name='Demo Foydalanuvchi', phone_number='+998901234567',
+        )
+        outsider = Client.objects.create(
+            full_name='Boshqa mijoz', phone_number='+998909999999',
+        )
+        account.client = linked_client
+        account.save(update_fields=('client', 'updated_at'))
+        marker = User.objects.create_user(
+            username='attendance-operator', first_name='Dilnoza', last_name='Karimova',
+        )
+        record = AttendanceRecord.objects.create(client=linked_client, group=self.group)
+        AttendanceRecord.objects.create(client=outsider, group=self.group)
+        AttendanceLesson.objects.create(
+            attendance=record,
+            date=date(2026, 9, 10),
+            status=AttendanceLesson.STATUS_ATTENDED,
+            note='QR orqali tasdiqlandi',
+            marked_by=marker,
+        )
+
+        response = self.client.get(reverse('main:telegram_app_bootstrap'), **self.headers)
+        course = response.json()['my_courses'][0]
+        self.assertEqual(course['course'], self.course.name)
+        self.assertEqual(course['teachers'], [])
+        self.assertEqual(len(course['participants']), 1)
+        self.assertEqual(course['participants'][0]['full_name'], linked_client.full_name)
+        self.assertEqual(len(course['participants'][0]['lessons']), 10)
+        first_lesson = course['participants'][0]['lessons'][0]
+        self.assertEqual(first_lesson['status'], AttendanceLesson.STATUS_ATTENDED)
+        self.assertEqual(first_lesson['marked_by'], 'Dilnoza Karimova')
+        self.assertTrue(first_lesson['marked_at'])
+        self.assertEqual(first_lesson['note'], 'QR orqali tasdiqlandi')
+        self.assertEqual(
+            course['participants'][0]['lessons'][1]['status'],
+            AttendanceLesson.STATUS_UNMARKED,
+        )
 
     def test_each_purchase_requires_its_own_contract_acceptance(self):
         self.client.get(reverse('main:telegram_app_bootstrap'), **self.headers)

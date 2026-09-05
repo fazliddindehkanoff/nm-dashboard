@@ -21,16 +21,17 @@
         <button class="avatar" id="profileButton" type="button" aria-label="Profilni ochish">N</button>
       </div>
       <div class="hero__copy">
-        <p class="eyebrow">Sizning yangi bosqichingiz</p>
+        <p class="eyebrow">Norbekov mobil kabineti</p>
         <h1 id="welcomeTitle">Xush kelibsiz</h1>
-        <p>Kursni tanlang, yaqinlaringizni qo‘shing va rivojlanishni birga boshlang.</p>
+        <p>Kurslaringiz, darslar va davomatingiz bir joyda.</p>
       </div>
-      <div class="journey" aria-label="Ro‘yxatdan o‘tish bosqichlari">
-        <div class="journey__step is-active"><span>1</span><small>Kurs</small></div>
-        <div class="journey__line"></div>
-        <div class="journey__step"><span>2</span><small>To‘lov</small></div>
-        <div class="journey__line"></div>
-        <div class="journey__step"><span>3</span><small>Anketa</small></div>
+      <button class="hero-course-link" id="heroCoursesButton" type="button">
+        <span class="hero-course-link__signal" aria-hidden="true"><i></i></span>
+        <span><small>O‘qish holati</small><strong id="heroCourseSummary">Kurslar yuklanmoqda</strong></span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+      </button>
+      <div class="hero-route" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
       </div>
     </header>
 
@@ -65,14 +66,47 @@
       </section>
 
       <section class="view is-active" id="homeView">
+        <div class="section-heading section-heading--dashboard">
+          <div><p class="eyebrow eyebrow--dark">Bugungi holat</p><h2>O‘qish ritmingiz</h2></div>
+        </div>
+        <div class="learning-overview" id="learningOverview">
+          <div class="skeleton skeleton--overview"></div>
+        </div>
+        <button class="dashboard-course-link" id="openCoursesFromHome" type="button">
+          <span><small>Kurslar bo‘limi</small><strong>Xaridlar va yangi guruhlarni ko‘ring</strong></span>
+          <span class="dashboard-course-link__arrow">→</span>
+        </button>
+        <div id="purchaseHistory" class="checkout-history"></div>
+      </section>
+
+      <section class="view" id="coursesView">
         <div class="section-heading">
-          <div><p class="eyebrow eyebrow--dark">Siz uchun</p><h2>Kurslar</h2></div>
+          <div><p class="eyebrow eyebrow--dark">Shaxsiy kabinet</p><h2>Mening kurslarim</h2></div>
+          <span class="count-pill" id="myCourseCount">0 ta</span>
+        </div>
+        <div class="my-course-list" id="myCourseList">
+          <div class="skeleton"></div>
+        </div>
+        <div class="catalogue-heading">
+          <div><p class="eyebrow eyebrow--dark">Faol guruhlar</p><h2>Yangi kurslar</h2></div>
           <span class="count-pill" id="courseCount">0 ta</span>
         </div>
         <div class="course-list" id="courseList">
           <div class="skeleton"></div><div class="skeleton"></div>
         </div>
-        <div id="purchaseHistory"></div>
+      </section>
+
+      <section class="view course-detail-view" id="courseDetailView">
+        <button class="back-button" type="button" id="courseDetailBack"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Kurslarimga qaytish</button>
+        <div class="course-detail-head">
+          <div class="course-detail-head__mark"><img src="{% static 'main/brand/norbekov-mark.svg' %}" alt=""></div>
+          <div>
+            <span class="course-state" id="courseDetailState">Faol guruh</span>
+            <h2 id="courseDetailTitle">Kurs</h2>
+          </div>
+        </div>
+        <div class="course-detail-meta" id="courseDetailMeta"></div>
+        <div id="courseDetailParticipants"></div>
       </section>
 
       <section class="view" id="profileView">

@@ -13,6 +13,7 @@
   const state = {
     profile: null,
     courses: [],
+    myCourses: [],
     purchases: [],
     course: null,
     type: 'self',
@@ -20,10 +21,24 @@
     legal: null,
     legalReadOnly: false,
     legalReturnView: 'homeView',
+    selectedCourse: null,
   };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const money = value => `${new Intl.NumberFormat('uz-UZ', { maximumFractionDigits: 2 }).format(Number(value || 0))} UZS`;
+  const monthNames = ['yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun', 'iyul', 'avgust', 'sentabr', 'oktabr', 'noyabr', 'dekabr'];
+  const formatDate = value => {
+    if (!value) return 'Sana biriktirilmagan';
+    const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+    return `${day} ${monthNames[month - 1]} ${year}`;
+  };
+  const formatDateTime = value => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    const date = `${parsed.getDate()} ${monthNames[parsed.getMonth()]}`;
+    const time = `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+    return `${date}, ${time}`;
+  };
   const initials = name => (name || 'N').split(/\s+/).slice(0, 2).map(v => v[0]).join('').toUpperCase();
   const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
   const csrf = $('meta[name="csrf-token"]').content;
@@ -55,9 +70,13 @@
 
   function showView(id, step = 1) {
     $$('.view').forEach(node => node.classList.toggle('is-active', node.id === id));
-    $('.hero').style.display = ['homeView', 'profileView'].includes(id) ? '' : 'none';
-    $('.bottom-nav').style.display = ['homeView', 'profileView'].includes(id) ? '' : 'none';
+    $('.hero').style.display = id === 'homeView' ? '' : 'none';
+    $('.bottom-nav').style.display = ['homeView', 'coursesView', 'profileView'].includes(id) ? '' : 'none';
     setJourney(step); window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function setMainNav(name) {
+    $$('.bottom-nav button').forEach(node => node.classList.toggle('is-active', node.dataset.nav === name));
   }
 
   function configureLegalGate(kind, documentData, readOnly = false) {
@@ -143,23 +162,93 @@
     $('#selfParticipant').innerHTML = `<span class="person-dot">${escapeHtml(initials(name))}</span><div><strong>${escapeHtml(name)}</strong><small>${escapeHtml(state.profile.phone_number)}</small></div>`;
   }
 
+  function courseStats(course) {
+    const lessons = course.participants.flatMap(participant => participant.lessons || []);
+    const attended = lessons.filter(lesson => ['attended', 'late'].includes(lesson.status)).length;
+    const marked = lessons.filter(lesson => lesson.status !== 'unmarked').length;
+    return { attended, marked, total: lessons.length };
+  }
+
+  function renderLearningOverview() {
+    const activeCourses = state.myCourses.filter(course => course.is_active && course.assignment_status === 'assigned');
+    const totals = state.myCourses.reduce((sum, course) => {
+      const stats = courseStats(course);
+      sum.attended += stats.attended;
+      sum.marked += stats.marked;
+      return sum;
+    }, { attended: 0, marked: 0 });
+    $('#heroCourseSummary').textContent = activeCourses.length
+      ? `${activeCourses.length} ta faol kurs · ${totals.attended} ta qatnashuv`
+      : 'Faol kurs hali biriktirilmagan';
+
+    const host = $('#learningOverview');
+    if (!state.myCourses.length) {
+      host.innerHTML = `<article class="overview-empty"><span class="overview-empty__mark">N</span><div><strong>Kurslaringiz shu yerda ko‘rinadi</strong><p>Faol guruhdan kurs tanlang yoki markaz biriktirgan guruhni kuzating.</p></div></article>`;
+      return;
+    }
+
+    const featured = activeCourses[0] || state.myCourses[0];
+    const stats = courseStats(featured);
+    const progress = stats.total ? Math.round(stats.attended * 100 / stats.total) : 0;
+    host.innerHTML = `
+      <div class="overview-metrics">
+        <article><small>Faol kurs</small><strong>${activeCourses.length}</strong></article>
+        <article><small>Qatnashilgan</small><strong>${totals.attended}</strong></article>
+        <article><small>Qayd etilgan</small><strong>${totals.marked}</strong></article>
+      </div>
+      <button class="overview-featured" type="button" data-overview-course="${escapeHtml(featured.id)}">
+        <span class="overview-featured__top"><span>${featured.assignment_status === 'assigned' ? 'Davomat yo‘li' : 'Guruh kutilmoqda'}</span><strong>${stats.attended}/${stats.total || featured.number_of_days}</strong></span>
+        <span class="overview-featured__title">${escapeHtml(featured.course)}</span>
+        <span class="overview-featured__track"><i style="width:${progress}%"></i></span>
+        <span class="overview-featured__foot">${featured.assignment_status === 'assigned' ? `${featured.participants.length} ishtirokchi · ${formatDate(featured.start_date)}` : 'To‘lov qabul qilingan · guruh hali biriktirilmagan'}<b>Ochish →</b></span>
+      </button>`;
+    $('[data-overview-course]', host).addEventListener('click', () => openCourseDetail(featured.id));
+  }
+
   function renderCourses() {
     $('#courseCount').textContent = `${state.courses.length} ta`;
     $('#courseList').innerHTML = state.courses.length ? state.courses.map(course => `
       <article class="course-card">
         <div class="course-card__top"><span class="course-mark"><img src="/static/main/brand/norbekov-mark.svg" alt=""></span>
-          <div><h3>${escapeHtml(course.name)}</h3><p>${course.number_of_days || 0} kunlik rivojlanish dasturi</p></div>
+          <div><span class="availability"><i></i> Faol guruh bor</span><h3>${escapeHtml(course.name)}</h3><p>${course.number_of_days || 0} kunlik rivojlanish dasturi</p></div>
         </div>
+        <div class="course-card__schedule"><span><small>Eng yaqin guruh</small><strong>${formatDate(course.active_groups[0]?.start_date)}</strong></span><span><small>Ustoz</small><strong>${escapeHtml(course.active_groups[0]?.teachers?.join(', ') || 'Tez orada')}</strong></span></div>
         <div class="course-card__bottom"><div class="price"><small>Bir kishi uchun</small><strong>${money(course.price)}</strong></div>
           <button class="select-button" type="button" data-course-id="${course.id}">Tanlash</button></div>
-      </article>`).join('') : '<article class="course-card"><h3>Hozircha kurslar yo‘q</h3><p>Yangi kurslar tez orada qo‘shiladi.</p></article>';
+      </article>`).join('') : '<article class="course-card"><h3>Hozircha faol guruh yo‘q</h3><p>Yangi guruh ochilganda kurs shu yerda paydo bo‘ladi.</p></article>';
     $$('[data-course-id]').forEach(button => button.addEventListener('click', () => startCheckout(Number(button.dataset.courseId))));
+  }
+
+  function renderMyCourses() {
+    $('#myCourseCount').textContent = `${state.myCourses.length} ta`;
+    const host = $('#myCourseList');
+    if (!state.myCourses.length) {
+      host.innerHTML = `<article class="my-course-empty"><span>+</span><div><strong>Hali xarid qilingan kurs yo‘q</strong><p>Quyidagi faol guruhlardan birini tanlang.</p></div></article>`;
+      return;
+    }
+    host.innerHTML = state.myCourses.map(course => {
+      const stats = courseStats(course);
+      const awaiting = course.assignment_status === 'awaiting_group';
+      const progress = stats.total ? Math.round(stats.attended * 100 / stats.total) : 0;
+      const stateLabel = awaiting ? 'Guruh kutilmoqda' : course.is_active ? 'Faol guruh' : 'Yakunlangan';
+      const tone = awaiting ? 'waiting' : course.is_active ? 'active' : 'complete';
+      return `
+        <button class="my-course-card" type="button" data-my-course="${escapeHtml(course.id)}">
+          <span class="my-course-card__head"><span class="course-state course-state--${tone}">${stateLabel}</span><span>${course.participants.length} ishtirokchi</span></span>
+          <strong class="my-course-card__title">${escapeHtml(course.course)}</strong>
+          <span class="my-course-card__meta">${awaiting ? 'Markaz guruhni biriktirgach darslar ko‘rinadi' : `${formatDate(course.start_date)} · ${course.number_of_days} kun`}</span>
+          <span class="my-course-card__progress"><i style="width:${progress}%"></i></span>
+          <span class="my-course-card__foot"><span>${awaiting ? 'Davomat hali boshlanmagan' : `${stats.attended} ta qatnashuv · ${stats.marked} ta qayd`}</span><b>Batafsil →</b></span>
+        </button>`;
+    }).join('');
+    $$('[data-my-course]', host).forEach(button => button.addEventListener('click', () => openCourseDetail(button.dataset.myCourse)));
   }
 
   function renderHistory() {
     const host = $('#purchaseHistory');
-    if (!state.purchases.length) { host.innerHTML = ''; return; }
-    host.innerHTML = `<h2 class="history-heading">Mening kurslarim</h2>${state.purchases.map(item => {
+    const pendingPurchases = state.purchases.filter(item => item.payment_status !== 'success' || !item.questionnaire_completed);
+    if (!pendingPurchases.length) { host.innerHTML = ''; return; }
+    host.innerHTML = `<h2 class="history-heading">Yakunlanmagan xaridlar</h2>${pendingPurchases.map(item => {
       const done = item.questionnaire_completed && item.payment_status === 'success';
       const paid = item.payment_status === 'success';
       const label = done ? 'Tayyor' : paid ? 'Anketa kutilmoqda' : item.payment_status_label;
@@ -171,6 +260,56 @@
       const purchase = state.purchases.find(item => item.id === Number(button.dataset.viewContract));
       if (purchase) openContract(purchase, true);
     }));
+  }
+
+  function lessonTone(status) {
+    return ['attended', 'late', 'absent', 'excused'].includes(status) ? status : 'unmarked';
+  }
+
+  function renderCourseDetail(course) {
+    state.selectedCourse = course;
+    const awaiting = course.assignment_status === 'awaiting_group';
+    $('#courseDetailTitle').textContent = course.course;
+    const stateNode = $('#courseDetailState');
+    stateNode.textContent = awaiting ? 'Guruh kutilmoqda' : course.is_active ? 'Faol guruh' : 'Yakunlangan';
+    stateNode.className = `course-state course-state--${awaiting ? 'waiting' : course.is_active ? 'active' : 'complete'}`;
+    $('#courseDetailMeta').innerHTML = awaiting ? `
+      <div><small>Holat</small><strong>Guruh biriktirilmoqda</strong></div>
+      <div><small>Davomiyligi</small><strong>${course.number_of_days} kun</strong></div>` : `
+      <div><small>Boshlanish</small><strong>${formatDate(course.start_date)}</strong></div>
+      <div><small>Davomiyligi</small><strong>${course.number_of_days} kun</strong></div>
+      <div class="course-detail-meta__wide"><small>Ustoz</small><strong>${escapeHtml(course.teachers.join(', ') || 'Biriktirilmoqda')}</strong></div>`;
+
+    const participantsHost = $('#courseDetailParticipants');
+    if (awaiting) {
+      participantsHost.innerHTML = `<article class="attendance-awaiting"><span class="attendance-awaiting__icon">⌁</span><h3>Davomat guruh bilan ochiladi</h3><p>Markaz sizni guruhga biriktirgach, har bir dars sanasi va davomat qaydi shu sahifada ko‘rinadi.</p><div>${course.participants.map(item => `<span>${escapeHtml(item.full_name)}</span>`).join('')}</div></article>`;
+      return;
+    }
+
+    participantsHost.innerHTML = course.participants.map(participant => {
+      const stats = courseStats({ participants: [participant] });
+      return `<section class="participant-attendance">
+        <div class="participant-attendance__head"><span class="person-dot">${escapeHtml(initials(participant.full_name))}</span><div><small>Ishtirokchi</small><h3>${escapeHtml(participant.full_name)}</h3><p>${escapeHtml(participant.status_label)}</p></div><strong>${stats.attended}/${participant.lessons.length}</strong></div>
+        <div class="attendance-summary"><span><small>Qatnashdi</small><strong>${stats.attended}</strong></span><span><small>Qayd qilindi</small><strong>${stats.marked}</strong></span><span><small>Oxirgi kelgan</small><strong>${participant.last_attended_at ? formatDate(participant.last_attended_at) : '—'}</strong></span></div>
+        <div class="attendance-timeline">${participant.lessons.map(lesson => `
+          <article class="lesson-row lesson-row--${lessonTone(lesson.status)}">
+            <span class="lesson-row__rail"><i></i></span>
+            <div class="lesson-row__body">
+              <div class="lesson-row__top"><span><small>${lesson.day_number}-dars</small><strong>${formatDate(lesson.date)}</strong></span><b>${escapeHtml(lesson.status_label)}</b></div>
+              <p>${lesson.marked_at ? `${formatDateTime(lesson.marked_at)} · ${escapeHtml(lesson.marked_by || 'Markaz xodimi')} tomonidan belgilandi` : 'Hali davomat qaydi kiritilmagan'}</p>
+              ${lesson.reason ? `<em>Sabab: ${escapeHtml(lesson.reason)}</em>` : ''}
+              ${lesson.note ? `<em>Izoh: ${escapeHtml(lesson.note)}</em>` : ''}
+            </div>
+          </article>`).join('')}</div>
+      </section>`;
+    }).join('');
+  }
+
+  function openCourseDetail(courseId) {
+    const course = state.myCourses.find(item => String(item.id) === String(courseId));
+    if (!course) return;
+    renderCourseDetail(course);
+    showView('courseDetailView', 1);
   }
 
   function startCheckout(courseId) {
@@ -341,12 +480,19 @@
     else { renderPayment(); showView('paymentView', 2); }
   }
 
-  function goHome() { showView('homeView', 1); renderHistory(); $$('.bottom-nav button').forEach((node, i) => node.classList.toggle('is-active', i === 0)); }
+  function goHome() { showView('homeView', 1); renderHistory(); setMainNav('home'); }
+
+  function showCourses() {
+    renderMyCourses();
+    renderCourses();
+    showView('coursesView', 1);
+    setMainNav('courses');
+  }
 
   async function bootstrap() {
     try {
-      const data = await api('/telegram-app/api/bootstrap/'); Object.assign(state, { profile: data.profile, courses: data.courses, purchases: data.purchases });
-      renderProfile(); renderCourses(); renderHistory();
+      const data = await api('/telegram-app/api/bootstrap/'); Object.assign(state, { profile: data.profile, courses: data.courses, myCourses: data.my_courses || [], purchases: data.purchases });
+      renderProfile(); renderLearningOverview(); renderMyCourses(); renderCourses(); renderHistory();
       if (data.legal.terms_required) openTerms(true);
     } catch (error) {
       $('#courseList').innerHTML = `<article class="course-card"><h3>Ilovani ochib bo‘lmadi</h3><p>${escapeHtml(error.message)} Telegram bot ichidagi tugma orqali qayta urinib ko‘ring.</p></article>`;
@@ -358,9 +504,14 @@
   $('#addFamilyMember').addEventListener('click', addFamilyMember); $('#continueToPayment').addEventListener('click', createPurchase); $('#payButton').addEventListener('click', startPayment); $('#questionnaireForm').addEventListener('submit', submitQuestionnaire);
   $('#acceptTerms').addEventListener('click', acceptTerms); $('#acceptContract').addEventListener('click', acceptContract);
   $('#viewTerms').addEventListener('click', () => openTerms(false)); $('#viewContract').addEventListener('click', () => openContract(state.purchase, true));
+  $('#heroCoursesButton').addEventListener('click', showCourses); $('#openCoursesFromHome').addEventListener('click', showCourses); $('#courseDetailBack').addEventListener('click', showCourses);
   $('#contractBack').addEventListener('click', goHome); $('#checkoutBack').addEventListener('click', goHome); $('#paymentBack').addEventListener('click', () => state.purchase ? goHome() : showView('checkoutView', 1));
-  $('#profileButton').addEventListener('click', () => showView('profileView', 1)); $$('[data-go-home]').forEach(node => node.addEventListener('click', goHome));
-  $$('[data-nav]').forEach(button => button.addEventListener('click', () => { $$('.bottom-nav button').forEach(node => node.classList.toggle('is-active', node === button)); if (button.dataset.nav === 'profile') showView('profileView', 1); else { showView('homeView', 1); if (button.dataset.nav === 'courses') $('#courseList').scrollIntoView({ behavior: 'smooth' }); } }));
+  $('#profileButton').addEventListener('click', () => { showView('profileView', 1); setMainNav('profile'); }); $$('[data-go-home]').forEach(node => node.addEventListener('click', goHome));
+  $$('[data-nav]').forEach(button => button.addEventListener('click', () => {
+    if (button.dataset.nav === 'profile') { showView('profileView', 1); setMainNav('profile'); }
+    else if (button.dataset.nav === 'courses') showCourses();
+    else goHome();
+  }));
   $('#checkPayment').addEventListener('click', () => checkPayment(true));
   window.addEventListener('focus', () => checkPayment());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) checkPayment(); });

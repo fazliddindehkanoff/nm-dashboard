@@ -2,7 +2,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -16,13 +16,17 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import (
+    AttendanceLesson,
+    AttendanceRecord,
     Client,
     Course,
     EnrollmentQuestionnaire,
+    Group,
     LegalAcceptance,
     MiniAppPurchase,
     MiniAppPurchaseMember,
     MulticardInvoice,
+    Operator,
     TelegramUser,
 )
 from .services.legal import (
@@ -242,12 +246,153 @@ def _purchase_payload(purchase):
     }
 
 
+def _active_course_payloads():
+    """Return one catalogue entry per course that has a sellable active group."""
+    groups = (
+        Group.objects.filter(is_active=True)
+        .select_related('course')
+        .prefetch_related('teachers')
+        .order_by('course__name', 'start_date', 'id')
+    )
+    courses = {}
+    for group in groups:
+        course = group.course
+        payload = courses.setdefault(course.id, {
+            'id': course.id,
+            'name': course.name,
+            'price': str(course.price),
+            'number_of_days': course.number_of_days,
+            'active_groups': [],
+        })
+        payload['active_groups'].append({
+            'id': group.id,
+            'start_date': group.start_date.isoformat(),
+            'number_of_days': group.number_of_days,
+            'teachers': [teacher.full_name for teacher in group.teachers.all()],
+        })
+    return list(courses.values())
+
+
+def _attendance_marker_name(user):
+    if not user:
+        return ''
+    try:
+        return user.operator.full_name
+    except (AttributeError, Operator.DoesNotExist):
+        return user.get_full_name() or user.username
+
+
+def _attendance_participant_payload(record):
+    lessons_by_date = {lesson.date: lesson for lesson in record.lessons.all()}
+    lessons = []
+    for day_index in range(record.group.number_of_days):
+        lesson_date = record.group.start_date + timedelta(days=day_index)
+        lesson = lessons_by_date.get(lesson_date)
+        lessons.append({
+            'day_number': day_index + 1,
+            'date': lesson_date.isoformat(),
+            'status': lesson.status if lesson else AttendanceLesson.STATUS_UNMARKED,
+            'status_label': (
+                lesson.get_status_display() if lesson else str(dict(AttendanceLesson.STATUSES)[AttendanceLesson.STATUS_UNMARKED])
+            ),
+            'reason': lesson.reason if lesson else '',
+            'note': lesson.note if lesson else '',
+            'marked_at': lesson.created_at.isoformat() if lesson else '',
+            'marked_by': _attendance_marker_name(lesson.marked_by) if lesson else '',
+        })
+    return {
+        'client_id': record.client_id,
+        'full_name': record.client.full_name,
+        'status': record.status,
+        'status_label': record.get_status_display(),
+        'last_attended_at': record.last_attended_at.isoformat() if record.last_attended_at else '',
+        'attended_lessons_count': record.attended_lessons_count,
+        'lessons': lessons,
+    }
+
+
+def _my_course_payloads(account, purchases):
+    """Expose attendance only for the account owner and paid purchase members."""
+    client_ids = {account.client_id} if account.client_id else set()
+    paid_purchases = [
+        purchase for purchase in purchases
+        if purchase.payment_status == MiniAppPurchase.PAYMENT_SUCCESS
+    ]
+    for purchase in paid_purchases:
+        client_ids.update(
+            member.client_id for member in purchase.members.all() if member.client_id
+        )
+
+    records = list(
+        AttendanceRecord.objects.filter(client_id__in=client_ids)
+        .select_related('client', 'group__course')
+        .prefetch_related('group__teachers', 'lessons__marked_by__operator')
+        .order_by('-group__is_active', '-group__start_date', 'client__full_name')
+    ) if client_ids else []
+
+    grouped = {}
+    for record in records:
+        group = record.group
+        course = group.course
+        payload = grouped.setdefault(group.id, {
+            'id': f'group-{group.id}',
+            'group_id': group.id,
+            'purchase_id': None,
+            'course_id': course.id,
+            'course': course.name,
+            'start_date': group.start_date.isoformat(),
+            'number_of_days': group.number_of_days,
+            'is_active': group.is_active,
+            'teachers': [teacher.full_name for teacher in group.teachers.all()],
+            'assignment_status': 'assigned',
+            'participants': [],
+        })
+        payload['participants'].append(_attendance_participant_payload(record))
+
+    result = list(grouped.values())
+    covered_pairs = {
+        (record.client_id, record.group.course_id) for record in records
+    }
+    for purchase in paid_purchases:
+        members = list(purchase.members.all())
+        if any(
+            member.client_id and (member.client_id, purchase.course_id) in covered_pairs
+            for member in members
+        ):
+            continue
+        result.append({
+            'id': f'purchase-{purchase.id}',
+            'group_id': None,
+            'purchase_id': purchase.id,
+            'course_id': purchase.course_id,
+            'course': purchase.course.name,
+            'start_date': '',
+            'number_of_days': purchase.course.number_of_days,
+            'is_active': True,
+            'teachers': [],
+            'assignment_status': 'awaiting_group',
+            'participants': [
+                {
+                    'client_id': member.client_id,
+                    'full_name': member.full_name,
+                    'status': 'awaiting_group',
+                    'status_label': 'Guruh biriktirilmoqda',
+                    'last_attended_at': '',
+                    'attended_lessons_count': 0,
+                    'lessons': [],
+                }
+                for member in members
+            ],
+        })
+    return result
+
+
 @require_GET
 def telegram_app_bootstrap(request):
     account, error = _authenticate(request)
     if error:
         return error
-    purchases = (
+    purchases = list(
         account.purchases.select_related('course', 'multicard_invoice')
         .prefetch_related('members__questionnaire', 'legal_acceptances')
     )
@@ -262,15 +407,8 @@ def telegram_app_bootstrap(request):
             'terms_required': not terms_accepted(account),
             'terms_version': TERMS_VERSION,
         },
-        'courses': [
-            {
-                'id': course.id,
-                'name': course.name,
-                'price': str(course.price),
-                'number_of_days': course.number_of_days,
-            }
-            for course in Course.objects.order_by('name')
-        ],
+        'courses': _active_course_payloads(),
+        'my_courses': _my_course_payloads(account, purchases),
         'purchases': [_purchase_payload(item) for item in purchases],
     })
 
@@ -426,7 +564,9 @@ def telegram_app_create_purchase(request):
                 'error': "Avval foydalanish shartlarini qabul qiling.",
             }, status=409)
         data = _json_body(request)
-        course = Course.objects.get(pk=data.get('course_id'))
+        course = Course.objects.filter(
+            pk=data.get('course_id'), group__is_active=True,
+        ).distinct().get()
         purchase_type = data.get('purchase_type')
         if purchase_type not in dict(MiniAppPurchase.PURCHASE_TYPES):
             raise ValueError("Xarid turini tanlang.")
