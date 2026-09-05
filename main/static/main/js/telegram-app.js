@@ -124,6 +124,9 @@
     try {
       state.purchase = purchase;
       const data = await api(`/telegram-app/api/purchases/${purchase.id}/contract/`);
+      const current = { ...purchase, contract_accepted: data.document.accepted };
+      state.purchase = current;
+      replacePurchase(current);
       state.legalReturnView = readOnly ? 'homeView' : 'homeView';
       configureLegalGate('contract', data.document, readOnly && data.document.accepted);
       showView('contractView', 2);
@@ -207,6 +210,10 @@
 
   function renderPayment() {
     const p = state.purchase;
+    if (!p.contract_accepted) {
+      openContract(p);
+      return;
+    }
     $('#paymentSummary').innerHTML = `<div class="summary-row"><span>Kurs</span><strong>${escapeHtml(p.course)}</strong></div><div class="summary-row"><span>Xarid turi</span><strong>${escapeHtml(p.purchase_type_label)}</strong></div><div class="summary-row"><span>Ishtirokchilar</span><strong>${p.participant_count} kishi</strong></div><div class="summary-row summary-total"><span>Jami</span><strong>${money(p.total_amount)}</strong></div>`;
     $('#contractVersionLabel').textContent = `Versiya ${p.contract_version}`;
     const demo = document.body.dataset.demo === '1';
@@ -244,8 +251,8 @@
         method: 'POST',
         body: JSON.stringify({ accepted: true, version: state.legal.version }),
       });
-      state.purchase.contract_accepted = true;
-      replacePurchase(state.purchase);
+      state.purchase = data.purchase;
+      replacePurchase(data.purchase);
       renderPayment();
       showView('paymentView', 2);
       toast('Shartnoma qabul qilindi. Endi to‘lovni amalga oshirishingiz mumkin.');

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import re
@@ -41,6 +42,23 @@ from .services.multicard import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _telegram_asset_version():
+    """Change static URLs whenever a Mini App asset changes.
+
+    Production serves static assets with an immutable seven-day cache, so a
+    stable URL can leave Telegram running an older checkout flow after deploys.
+    """
+    digest = hashlib.sha256()
+    for relative_path in (
+        'main/static/main/css/telegram-app.css',
+        'main/static/main/css/telegram-app-icons.css',
+        'main/static/main/css/telegram-app-legal.css',
+        'main/static/main/js/telegram-app.js',
+    ):
+        digest.update((settings.BASE_DIR / relative_path).read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def _digits(value):
@@ -175,6 +193,7 @@ def telegram_webhook(request):
 def telegram_app(request):
     return render(request, 'telegram_app/index.html', {
         'demo_mode': settings.DEBUG and request.GET.get('demo') == '1',
+        'asset_version': _telegram_asset_version(),
     })
 
 
@@ -384,6 +403,7 @@ def telegram_app_accept_contract(request, purchase_id):
             'ok': True,
             'accepted_at': acceptance.accepted_at.isoformat(),
             'version': acceptance.version,
+            'purchase': _purchase_payload(_account_purchase(account, purchase_id)),
         })
     except ValueError as exc:
         return JsonResponse({'ok': False, 'error': str(exc)}, status=400)

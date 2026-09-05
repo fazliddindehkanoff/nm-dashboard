@@ -190,6 +190,63 @@ class TelegramMiniAppTests(TestCase):
         self.assertFalse(final_bootstrap.json()['legal']['terms_required'])
         self.assertTrue(final_bootstrap.json()['purchases'][0]['contract_accepted'])
 
+    def test_each_purchase_requires_its_own_contract_acceptance(self):
+        self.client.get(reverse('main:telegram_app_bootstrap'), **self.headers)
+        self.post_json(reverse('main:telegram_app_accept_terms'), {
+            'accepted': True,
+            'version': TERMS_VERSION,
+        })
+
+        purchase_ids = []
+        for _ in range(2):
+            response = self.post_json(reverse('main:telegram_app_create_purchase'), {
+                'course_id': self.course.id,
+                'purchase_type': MiniAppPurchase.TYPE_SELF,
+                'members': [],
+            })
+            self.assertEqual(response.status_code, 201)
+            purchase_ids.append(response.json()['purchase']['id'])
+
+        first_acceptance = self.post_json(
+            reverse('main:telegram_app_accept_contract', args=[purchase_ids[0]]),
+            {'accepted': True, 'version': CONTRACT_VERSION},
+        )
+        self.assertEqual(first_acceptance.status_code, 200)
+        self.assertTrue(first_acceptance.json()['purchase']['contract_accepted'])
+
+        second_contract = self.client.get(
+            reverse('main:telegram_app_contract', args=[purchase_ids[1]]),
+            **self.headers,
+        )
+        self.assertEqual(second_contract.status_code, 200)
+        self.assertFalse(second_contract.json()['document']['accepted'])
+        blocked_payment = self.post_json(
+            reverse('main:telegram_app_simulate_payment', args=[purchase_ids[1]]), {},
+        )
+        self.assertEqual(blocked_payment.status_code, 409)
+
+        second_acceptance = self.post_json(
+            reverse('main:telegram_app_accept_contract', args=[purchase_ids[1]]),
+            {'accepted': True, 'version': CONTRACT_VERSION},
+        )
+        self.assertEqual(second_acceptance.status_code, 200)
+        self.assertTrue(second_acceptance.json()['purchase']['contract_accepted'])
+        self.assertEqual(
+            LegalAcceptance.objects.filter(
+                telegram_user__telegram_id=900000001,
+                document_type=LegalAcceptance.DOCUMENT_CONTRACT,
+            ).count(),
+            2,
+        )
+
+    def test_mini_app_uses_content_versioned_static_assets(self):
+        response = self.client.get(reverse('main:telegram_app'))
+        self.assertEqual(response.status_code, 200)
+        self.assertRegex(
+            response.content.decode(),
+            r'main/js/telegram-app\.js\?v=[0-9a-f]{12}',
+        )
+
     def test_rejects_false_or_outdated_legal_acceptance(self):
         false_terms = self.post_json(reverse('main:telegram_app_accept_terms'), {
             'accepted': False,
