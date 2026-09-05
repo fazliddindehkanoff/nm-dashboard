@@ -83,6 +83,19 @@ class TelegramWebhookTests(TestCase):
         self.assertFalse(TelegramUser.objects.filter(telegram_id=7722).exists())
         self.assertEqual(send_message.call_count, 1)
 
+    @patch(
+        'main.telegram_views.send_bot_message',
+        return_value=(False, "Forbidden: bot can't initiate conversation with a user"),
+    )
+    def test_webhook_acknowledges_permanently_undeliverable_update(self, send_message):
+        response = self.post_update({
+            'from': {'id': 7723, 'username': 'blocked-user'},
+            'text': '/start',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(TelegramUser.objects.filter(telegram_id=7723).exists())
+        self.assertEqual(send_message.call_count, 1)
+
 
 @override_settings(DEBUG=True, TELEGRAM=TELEGRAM_SETTINGS)
 class TelegramMiniAppTests(TestCase):

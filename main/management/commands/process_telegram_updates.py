@@ -78,7 +78,15 @@ class Command(BaseCommand):
                 updates = data.get('result') or []
                 for update in updates:
                     update_id = int(update['update_id'])
-                    process_telegram_update(update)
+                    try:
+                        process_telegram_update(update)
+                    except TelegramDeliveryError as exc:
+                        if exc.retryable:
+                            raise
+                        logger.warning(
+                            "Telegram update %s permanently undeliverable; skipping: %s",
+                            update_id, exc,
+                        )
                     offset = update_id + 1
                     save_offset(offset_file, offset)
             except TelegramDeliveryError as exc:

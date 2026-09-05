@@ -106,13 +106,18 @@ def _web_app_url(request=None):
 
 
 class TelegramDeliveryError(Exception):
-    pass
+    def __init__(self, message, retryable=True):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 def _deliver_bot_message(chat_id, text, reply_markup=None):
     ok, detail = send_bot_message(chat_id, text, reply_markup=reply_markup)
     if not ok:
-        raise TelegramDeliveryError(detail or 'Telegram xabarni qabul qilmadi.')
+        message = detail or 'Telegram xabarni qabul qilmadi.'
+        normalized = message.lower()
+        permanent = normalized.startswith(('forbidden:', 'bad request:'))
+        raise TelegramDeliveryError(message, retryable=not permanent)
 
 
 def _send_onboarding_message(account, request):
@@ -208,7 +213,12 @@ def telegram_webhook(request):
 
     try:
         process_telegram_update(update, request)
-    except (TelegramDeliveryError, TelegramNotConfigured, ValueError) as exc:
+    except TelegramDeliveryError as exc:
+        if not exc.retryable:
+            logger.warning("Telegram update permanently undeliverable: %s", exc)
+            return JsonResponse({'ok': True})
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=503)
+    except (TelegramNotConfigured, ValueError) as exc:
         return JsonResponse({'ok': False, 'error': str(exc)}, status=503)
 
     return JsonResponse({'ok': True})
