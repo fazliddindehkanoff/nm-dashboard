@@ -70,6 +70,19 @@ class TelegramWebhookTests(TestCase):
         response = self.post_update({'from': {'id': 1}, 'text': '/start'}, secret='wrong')
         self.assertEqual(response.status_code, 403)
 
+    @patch(
+        'main.telegram_views.send_bot_message',
+        return_value=(False, 'Telegram tarmoq xatosi'),
+    )
+    def test_webhook_retries_failed_delivery_without_advancing_onboarding(self, send_message):
+        response = self.post_update({
+            'from': {'id': 7722, 'username': 'retry-user'},
+            'text': '/start',
+        })
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(TelegramUser.objects.filter(telegram_id=7722).exists())
+        self.assertEqual(send_message.call_count, 1)
+
 
 @override_settings(DEBUG=True, TELEGRAM=TELEGRAM_SETTINGS)
 class TelegramMiniAppTests(TestCase):

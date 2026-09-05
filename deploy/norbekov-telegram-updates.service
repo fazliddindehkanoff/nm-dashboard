@@ -1,0 +1,19 @@
+[Unit]
+Description=Norbekov Telegram incoming update worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/nm-dashboard
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/root/nm-dashboard/env/bin/python manage.py process_telegram_updates --timeout 25
+Restart=always
+RestartSec=3
+TimeoutStopSec=40
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

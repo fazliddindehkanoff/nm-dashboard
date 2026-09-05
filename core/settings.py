@@ -192,6 +192,7 @@ TELEGRAM = {
     "CHAT_ID": os.environ.get("TELEGRAM_CHAT_ID", ""),
     "WEB_APP_URL": os.environ.get("TELEGRAM_WEB_APP_URL", ""),
     "WEBHOOK_SECRET": os.environ.get("TELEGRAM_WEBHOOK_SECRET", ""),
+    "PREFER_IPV6": os.environ.get("TELEGRAM_PREFER_IPV6", "").lower() in {"1", "true", "yes"},
 }
 
 # Multicard hosted checkout. Keep disabled until merchant configuration is complete.

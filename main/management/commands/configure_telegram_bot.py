@@ -1,9 +1,10 @@
 from urllib.parse import urljoin
 
-import requests
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.urls import reverse
+
+from main.services.telegram import telegram_api_request
 
 
 class Command(BaseCommand):
@@ -18,6 +19,10 @@ class Command(BaseCommand):
             '--web-app-url',
             help='Mini App public HTTPS manzili; berilmasa base-url/telegram-app/ ishlatiladi.',
         )
+        parser.add_argument(
+            '--polling', action='store_true',
+            help='Webhookni o‘chirib, process_telegram_updates workeriga o‘tadi.',
+        )
 
     def handle(self, *args, **options):
         base_url = options['base_url'].rstrip('/') + '/'
@@ -31,27 +36,32 @@ class Command(BaseCommand):
         if not token:
             raise CommandError('TELEGRAM_BOT_TOKEN sozlanmagan.')
 
-        api_base = f'https://api.telegram.org/bot{token}/'
-        webhook_payload = {'url': webhook_url, 'allowed_updates': ['message']}
-        if telegram.get('WEBHOOK_SECRET'):
-            webhook_payload['secret_token'] = telegram['WEBHOOK_SECRET']
-        self._call(api_base, 'setWebhook', webhook_payload)
-        self._call(api_base, 'setChatMenuButton', {
+        if options['polling']:
+            self._call('deleteWebhook', {'drop_pending_updates': False})
+        else:
+            webhook_payload = {'url': webhook_url, 'allowed_updates': ['message']}
+            if telegram.get('WEBHOOK_SECRET'):
+                webhook_payload['secret_token'] = telegram['WEBHOOK_SECRET']
+            self._call('setWebhook', webhook_payload)
+        self._call('setChatMenuButton', {
             'menu_button': {
                 'type': 'web_app',
                 'text': 'Kurslar',
                 'web_app': {'url': web_app_url},
             },
         })
-        self.stdout.write(self.style.SUCCESS(f'Webhook ulandi: {webhook_url}'))
+        if options['polling']:
+            self.stdout.write(self.style.SUCCESS('Webhook o‘chirildi; long polling yoqildi.'))
+        else:
+            self.stdout.write(self.style.SUCCESS(f'Webhook ulandi: {webhook_url}'))
         self.stdout.write(self.style.SUCCESS(f'Mini App menyusi ulandi: {web_app_url}'))
 
     @staticmethod
-    def _call(api_base, method, payload):
+    def _call(method, payload):
         try:
-            response = requests.post(api_base + method, json=payload, timeout=20)
+            response = telegram_api_request(method, json=payload, timeout=(2, 20))
             data = response.json()
-        except (requests.RequestException, ValueError) as exc:
+        except Exception as exc:
             raise CommandError(f'Telegram {method} so‘rovi bajarilmadi: {exc}')
         if response.status_code != 200 or not data.get('ok'):
             raise CommandError(data.get('description') or f'Telegram {method}: HTTP {response.status_code}')

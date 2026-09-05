@@ -96,9 +96,23 @@ def _get_or_create_client(full_name, phone):
     return Client.objects.create(full_name=full_name, phone_number=phone)
 
 
-def _web_app_url(request):
+def _web_app_url(request=None):
     configured = (getattr(settings, 'TELEGRAM', {}) or {}).get('WEB_APP_URL', '')
-    return configured or request.build_absolute_uri(reverse('main:telegram_app'))
+    if configured:
+        return configured
+    if request is None:
+        raise TelegramNotConfigured('TELEGRAM_WEB_APP_URL sozlanmagan.')
+    return request.build_absolute_uri(reverse('main:telegram_app'))
+
+
+class TelegramDeliveryError(Exception):
+    pass
+
+
+def _deliver_bot_message(chat_id, text, reply_markup=None):
+    ok, detail = send_bot_message(chat_id, text, reply_markup=reply_markup)
+    if not ok:
+        raise TelegramDeliveryError(detail or 'Telegram xabarni qabul qilmadi.')
 
 
 def _send_onboarding_message(account, request):
@@ -108,12 +122,76 @@ def _send_onboarding_message(account, request):
             'web_app': {'url': _web_app_url(request)},
         }]],
     }
-    return send_bot_message(
+    _deliver_bot_message(
         account.telegram_id,
         f"✅ Rahmat, <b>{escape(account.full_name)}</b>!\n\n"
         "Profilingiz tayyor. Kurslarni ko'rish va xarid qilish uchun ilovani oching.",
         reply_markup=web_app_markup,
     )
+
+
+def process_telegram_update(update, request=None):
+    """Process one update atomically so a polling retry cannot skip onboarding steps."""
+    message = update.get('message') or {}
+    sender = message.get('from') or {}
+    telegram_id = sender.get('id')
+    if not telegram_id:
+        return
+
+    with transaction.atomic():
+        account, _ = TelegramUser.objects.get_or_create(
+            telegram_id=telegram_id,
+            defaults={'username': sender.get('username', '')},
+        )
+        if sender.get('username') and account.username != sender.get('username'):
+            account.username = sender['username']
+            account.save(update_fields=('username', 'updated_at'))
+
+        text = (message.get('text') or '').strip()
+        contact = message.get('contact') or {}
+        if text.startswith('/start'):
+            if account.onboarding_step == TelegramUser.STEP_READY and account.phone_number:
+                _send_onboarding_message(account, request)
+            else:
+                account.onboarding_step = TelegramUser.STEP_NAME
+                account.save(update_fields=('onboarding_step', 'updated_at'))
+                _deliver_bot_message(
+                    telegram_id,
+                    "Assalomu alaykum! Norbekov markaziga xush kelibsiz.\n\n"
+                    "Avval ism va familiyangizni yozing.",
+                    reply_markup={'remove_keyboard': True},
+                )
+        elif account.onboarding_step == TelegramUser.STEP_NAME:
+            if len(text) < 3:
+                _deliver_bot_message(telegram_id, "Ism va familiyangizni to'liqroq yozing.")
+            else:
+                account.full_name = text[:255]
+                account.onboarding_step = TelegramUser.STEP_CONTACT
+                account.save(update_fields=('full_name', 'onboarding_step', 'updated_at'))
+                _deliver_bot_message(
+                    telegram_id,
+                    "Endi telefon raqamingizni tasdiqlang.",
+                    reply_markup={
+                        'keyboard': [[{'text': 'Kontaktni yuborish', 'request_contact': True}]],
+                        'resize_keyboard': True,
+                        'one_time_keyboard': True,
+                    },
+                )
+        elif account.onboarding_step == TelegramUser.STEP_CONTACT:
+            if not contact.get('phone_number'):
+                _deliver_bot_message(telegram_id, "Pastdagi «Kontaktni yuborish» tugmasini bosing.")
+            elif contact.get('user_id') and contact.get('user_id') != telegram_id:
+                _deliver_bot_message(telegram_id, "Iltimos, aynan o'zingizning kontaktingizni yuboring.")
+            else:
+                account.phone_number = _normalise_phone(contact['phone_number'])
+                account.client = _find_client_by_phone(account.phone_number)
+                account.onboarding_step = TelegramUser.STEP_READY
+                account.save(update_fields=(
+                    'phone_number', 'client', 'onboarding_step', 'updated_at',
+                ))
+                _send_onboarding_message(account, request)
+        elif account.onboarding_step == TelegramUser.STEP_READY:
+            _send_onboarding_message(account, request)
 
 
 @csrf_exempt
@@ -128,67 +206,9 @@ def telegram_webhook(request):
     except json.JSONDecodeError:
         return JsonResponse({'ok': False, 'error': 'Invalid JSON'}, status=400)
 
-    message = update.get('message') or {}
-    sender = message.get('from') or {}
-    telegram_id = sender.get('id')
-    if not telegram_id:
-        return JsonResponse({'ok': True})
-
-    account, _ = TelegramUser.objects.get_or_create(
-        telegram_id=telegram_id,
-        defaults={'username': sender.get('username', '')},
-    )
-    if sender.get('username') and account.username != sender.get('username'):
-        account.username = sender['username']
-        account.save(update_fields=('username', 'updated_at'))
-
-    text = (message.get('text') or '').strip()
-    contact = message.get('contact') or {}
     try:
-        if text.startswith('/start'):
-            if account.onboarding_step == TelegramUser.STEP_READY and account.phone_number:
-                _send_onboarding_message(account, request)
-            else:
-                account.onboarding_step = TelegramUser.STEP_NAME
-                account.save(update_fields=('onboarding_step', 'updated_at'))
-                send_bot_message(
-                    telegram_id,
-                    "Assalomu alaykum! Norbekov markaziga xush kelibsiz.\n\n"
-                    "Avval ism va familiyangizni yozing.",
-                    reply_markup={'remove_keyboard': True},
-                )
-        elif account.onboarding_step == TelegramUser.STEP_NAME:
-            if len(text) < 3:
-                send_bot_message(telegram_id, "Ism va familiyangizni to'liqroq yozing.")
-            else:
-                account.full_name = text[:255]
-                account.onboarding_step = TelegramUser.STEP_CONTACT
-                account.save(update_fields=('full_name', 'onboarding_step', 'updated_at'))
-                send_bot_message(
-                    telegram_id,
-                    "Endi telefon raqamingizni tasdiqlang.",
-                    reply_markup={
-                        'keyboard': [[{'text': 'Kontaktni yuborish', 'request_contact': True}]],
-                        'resize_keyboard': True,
-                        'one_time_keyboard': True,
-                    },
-                )
-        elif account.onboarding_step == TelegramUser.STEP_CONTACT:
-            if not contact.get('phone_number'):
-                send_bot_message(telegram_id, "Pastdagi «Kontaktni yuborish» tugmasini bosing.")
-            elif contact.get('user_id') and contact.get('user_id') != telegram_id:
-                send_bot_message(telegram_id, "Iltimos, aynan o'zingizning kontaktingizni yuboring.")
-            else:
-                account.phone_number = _normalise_phone(contact['phone_number'])
-                account.client = _find_client_by_phone(account.phone_number)
-                account.onboarding_step = TelegramUser.STEP_READY
-                account.save(update_fields=(
-                    'phone_number', 'client', 'onboarding_step', 'updated_at',
-                ))
-                _send_onboarding_message(account, request)
-        elif account.onboarding_step == TelegramUser.STEP_READY:
-            _send_onboarding_message(account, request)
-    except (TelegramNotConfigured, ValueError) as exc:
+        process_telegram_update(update, request)
+    except (TelegramDeliveryError, TelegramNotConfigured, ValueError) as exc:
         return JsonResponse({'ok': False, 'error': str(exc)}, status=503)
 
     return JsonResponse({'ok': True})

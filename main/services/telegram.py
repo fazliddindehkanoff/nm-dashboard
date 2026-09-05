@@ -12,6 +12,9 @@ API HTTP endpointlariga yuboriladi — qo'shimcha og'ir bog'liqlik talab qilinma
 
 from io import BytesIO
 import json
+import socket
+from contextlib import contextmanager
+from threading import RLock
 
 import requests
 from django.conf import settings
@@ -22,7 +25,7 @@ from django.utils.html import escape
 import qrcode
 
 API_BASE = "https://api.telegram.org/bot{token}/{method}"
-_TIMEOUT = 15
+_DNS_LOCK = RLock()
 
 
 class TelegramNotConfigured(Exception):
@@ -47,13 +50,44 @@ def _get_chat_id():
     return chat_id
 
 
+@contextmanager
+def _telegram_address_family():
+    """Prefer Telegram's IPv6 address on hosts with a broken Telegram IPv4 route."""
+    prefer_ipv6 = (getattr(settings, "TELEGRAM", {}) or {}).get("PREFER_IPV6", False)
+    if not prefer_ipv6:
+        yield
+        return
+
+    with _DNS_LOCK:
+        original_getaddrinfo = socket.getaddrinfo
+
+        def telegram_getaddrinfo(host, port, family=0, socktype=0, proto=0, flags=0):
+            results = original_getaddrinfo(host, port, family, socktype, proto, flags)
+            if host == 'api.telegram.org':
+                ipv6_results = [result for result in results if result[0] == socket.AF_INET6]
+                return ipv6_results or results
+            return results
+
+        socket.getaddrinfo = telegram_getaddrinfo
+        try:
+            yield
+        finally:
+            socket.getaddrinfo = original_getaddrinfo
+
+
+def telegram_api_request(method, **kwargs):
+    """Call the Bot API using the configured address preference."""
+    token = _get_token()
+    with _telegram_address_family():
+        return requests.post(API_BASE.format(token=token, method=method), **kwargs)
+
+
 def send_bot_message(chat_id, text, reply_markup=None):
     """Send a plain bot message and return ``(ok, detail)``.
 
     This lightweight helper is shared by webhook onboarding and attendance
     notifications so the project does not need a second Telegram library.
     """
-    token = _get_token()
     payload = {
         "chat_id": chat_id,
         "text": text,
@@ -64,10 +98,10 @@ def send_bot_message(chat_id, text, reply_markup=None):
         payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
 
     try:
-        response = requests.post(
-            API_BASE.format(token=token, method="sendMessage"),
+        response = telegram_api_request(
+            "sendMessage",
             data=payload,
-            timeout=_TIMEOUT,
+            timeout=(2, 10),
         )
         result = response.json()
     except requests.RequestException as exc:
@@ -82,12 +116,11 @@ def send_bot_message(chat_id, text, reply_markup=None):
 def send_bot_photo(chat_id, photo_file):
     """Send a photo file. Network and response errors are returned, never raised."""
     try:
-        token = _get_token()
-        response = requests.post(
-            API_BASE.format(token=token, method="sendPhoto"),
+        response = telegram_api_request(
+            "sendPhoto",
             data={'chat_id': chat_id},
             files={'photo': photo_file},
-            timeout=_TIMEOUT,
+            timeout=(2, 10),
         )
         result = response.json()
     except TelegramNotConfigured:
@@ -211,12 +244,11 @@ def _send_qr_to_client(token, chat_id, transaction, client, sub_transaction=None
     qr_buffer = generate_qr_png(client.uuid)
     caption = _build_caption(transaction, client, sub_transaction=sub_transaction)
 
-    url = API_BASE.format(token=token, method="sendPhoto")
-    resp = requests.post(
-        url,
+    resp = telegram_api_request(
+        "sendPhoto",
         data={"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"},
         files={"photo": ("qr.png", qr_buffer, "image/png")},
-        timeout=_TIMEOUT,
+        timeout=(2, 10),
     )
 
     try:
