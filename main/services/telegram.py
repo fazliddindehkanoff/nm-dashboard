@@ -11,10 +11,12 @@ API HTTP endpointlariga yuboriladi — qo'shimcha og'ir bog'liqlik talab qilinma
 """
 
 from io import BytesIO
+import json
 
 import requests
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import models
 from django.utils.html import escape
 
 import qrcode
@@ -43,6 +45,101 @@ def _get_chat_id():
             "Telegram guruh chati sozlanmagan. TELEGRAM_CHAT_ID muhit o'zgaruvchisini bering."
         )
     return chat_id
+
+
+def send_bot_message(chat_id, text, reply_markup=None):
+    """Send a plain bot message and return ``(ok, detail)``.
+
+    This lightweight helper is shared by webhook onboarding and attendance
+    notifications so the project does not need a second Telegram library.
+    """
+    token = _get_token()
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup is not None:
+        payload["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+
+    try:
+        response = requests.post(
+            API_BASE.format(token=token, method="sendMessage"),
+            data=payload,
+            timeout=_TIMEOUT,
+        )
+        result = response.json()
+    except requests.RequestException as exc:
+        return False, f"Telegram tarmoq xatosi: {exc}"
+    except ValueError:
+        return False, f"Telegram noto'g'ri javob qaytardi (HTTP {response.status_code})."
+    if response.status_code == 200 and result.get("ok"):
+        return True, None
+    return False, result.get("description") or f"HTTP {response.status_code}"
+
+
+def send_bot_photo(chat_id, photo_file):
+    """Send a photo file. Network and response errors are returned, never raised."""
+    try:
+        token = _get_token()
+        response = requests.post(
+            API_BASE.format(token=token, method="sendPhoto"),
+            data={'chat_id': chat_id},
+            files={'photo': photo_file},
+            timeout=_TIMEOUT,
+        )
+        result = response.json()
+    except TelegramNotConfigured:
+        raise
+    except requests.RequestException as exc:
+        return False, f"Telegram tarmoq xatosi: {exc}"
+    except ValueError:
+        return False, f"Telegram noto'g'ri javob qaytardi (HTTP {response.status_code})."
+    if response.status_code == 200 and result.get('ok'):
+        return True, None
+    return False, result.get('description') or f"HTTP {response.status_code}"
+
+
+def send_attendance_notification(lesson):
+    """Notify the Telegram purchaser when a participant's attendance is marked."""
+    from main.models import TelegramUser
+
+    record = lesson.attendance
+    client = record.client
+    recipients = TelegramUser.objects.filter(
+        models.Q(client=client)
+        | models.Q(purchases__members__client=client)
+    ).distinct()
+    if not recipients:
+        return False, "Telegram foydalanuvchi topilmadi."
+
+    group = record.group
+    day_number = (lesson.date - group.start_date).days + 1
+    status_label = lesson.get_status_display()
+    status_icons = {
+        "attended": "✅",
+        "absent": "❌",
+        "excused": "🟡",
+        "late": "🕒",
+        "unmarked": "⚪️",
+    }
+    message = (
+        f"{status_icons.get(lesson.status, '📋')} <b>Davomat yangilandi</b>\n\n"
+        f"👤 {escape(client.full_name)}\n"
+        f"📚 {escape(group.course.name)}\n"
+        f"🗓 {day_number}-kun\n"
+        f"Holat: <b>{escape(str(status_label))}</b>"
+    )
+    if lesson.reason:
+        message += f"\nSabab: {escape(lesson.reason)}"
+
+    failures = []
+    for recipient in recipients:
+        ok, detail = send_bot_message(recipient.telegram_id, message)
+        if not ok:
+            failures.append(detail)
+    return not failures, "; ".join(filter(None, failures)) or None
 
 
 def generate_qr_png(data):

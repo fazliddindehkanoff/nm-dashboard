@@ -1,0 +1,61 @@
+.back-button {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+}
+
+.back-button svg {
+  fill: none;
+  height: 18px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 18px;
+}
+
+.notice-card__icon svg,
+.demo-note span svg {
+  fill: none;
+  height: 17px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 17px;
+}
+
+.payment-icon svg {
+  fill: none;
+  height: 31px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 31px;
+}
+
+.success-mark svg {
+  fill: none;
+  height: 43px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 43px;
+}
+
+.bottom-nav button .nav-icon {
+  fill: none;
+  height: 22px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 22px;
+}
+
+.bottom-nav button:first-child .nav-icon {
+  fill: currentColor;
+  stroke: none;
+}

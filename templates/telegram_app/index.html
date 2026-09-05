@@ -1,0 +1,156 @@
+{% load static %}
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#00213D">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Norbekov — Kurslar</title>
+  <link rel="icon" href="{% static 'main/brand/norbekov-mark.svg' %}" type="image/svg+xml">
+  <link rel="stylesheet" href="{% static 'main/css/telegram-app.css' %}">
+  <link rel="stylesheet" href="{% static 'main/css/telegram-app-icons.css' %}">
+  <link rel="stylesheet" href="{% static 'main/css/telegram-app-legal.css' %}">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body data-demo="{% if demo_mode %}1{% else %}0{% endif %}">
+  <div class="app-shell">
+    <header class="hero">
+      <div class="hero__top">
+        <img class="brand-logo" src="{% static 'main/brand/norbekov-logo-dark.svg' %}" alt="Norbekov">
+        <button class="avatar" id="profileButton" type="button" aria-label="Profilni ochish">N</button>
+      </div>
+      <div class="hero__copy">
+        <p class="eyebrow">Sizning yangi bosqichingiz</p>
+        <h1 id="welcomeTitle">Xush kelibsiz</h1>
+        <p>Kursni tanlang, yaqinlaringizni qo‘shing va rivojlanishni birga boshlang.</p>
+      </div>
+      <div class="journey" aria-label="Ro‘yxatdan o‘tish bosqichlari">
+        <div class="journey__step is-active"><span>1</span><small>Kurs</small></div>
+        <div class="journey__line"></div>
+        <div class="journey__step"><span>2</span><small>To‘lov</small></div>
+        <div class="journey__line"></div>
+        <div class="journey__step"><span>3</span><small>Anketa</small></div>
+      </div>
+    </header>
+
+    <main>
+      <section class="view legal-view" id="termsView" aria-labelledby="termsTitle">
+        <div class="legal-view__header">
+          <img src="{% static 'main/brand/norbekov-mark.svg' %}" alt="" aria-hidden="true">
+          <div><p class="eyebrow eyebrow--dark">Birinchi kirish</p><h2 id="termsTitle">Foydalanish shartlari</h2></div>
+        </div>
+        <p class="legal-view__intro" id="termsIntro">Davom etishdan oldin hujjatni oxirigacha o‘qing. Roziligingiz sana, qurilma va hujjat versiyasi bilan saqlanadi.</p>
+        <div class="legal-progress" aria-hidden="true"><span id="termsProgress"></span></div>
+        <div class="legal-scroll" id="termsScroll" tabindex="0" aria-label="Foydalanish shartlari matni"></div>
+        <div class="legal-action" id="termsAction">
+          <label class="legal-consent"><input type="checkbox" id="termsConsent" disabled><span>Foydalanish shartlarini o‘qidim, tushundim va qabul qilaman.</span></label>
+          <button type="button" class="primary-button primary-button--wide" id="acceptTerms" disabled>Oxirigacha o‘qing</button>
+        </div>
+      </section>
+
+      <section class="view legal-view" id="contractView" aria-labelledby="contractTitle">
+        <button class="back-button" type="button" id="contractBack"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Kurslarga qaytish</button>
+        <div class="legal-view__header legal-view__header--compact">
+          <img src="{% static 'main/brand/norbekov-mark.svg' %}" alt="" aria-hidden="true">
+          <div><p class="eyebrow eyebrow--dark">To‘lovdan oldin</p><h2 id="contractTitle">Xizmat shartnomasi</h2></div>
+        </div>
+        <p class="legal-view__intro" id="contractIntro">Shartnoma aynan shu xarid ma’lumotlari asosida tayyorlandi. Oxirigacha o‘qigach tasdiqlash faollashadi.</p>
+        <div class="legal-progress" aria-hidden="true"><span id="contractProgress"></span></div>
+        <div class="legal-scroll" id="contractScroll" tabindex="0" aria-label="Xizmat shartnomasi matni"></div>
+        <div class="legal-action" id="contractAction">
+          <label class="legal-consent"><input type="checkbox" id="contractConsent" disabled><span>Shartnoma va sog‘liq bo‘yicha alohida shartlarni o‘qidim hamda qabul qilaman.</span></label>
+          <button type="button" class="primary-button primary-button--wide" id="acceptContract" disabled>Oxirigacha o‘qing</button>
+        </div>
+      </section>
+
+      <section class="view is-active" id="homeView">
+        <div class="section-heading">
+          <div><p class="eyebrow eyebrow--dark">Siz uchun</p><h2>Kurslar</h2></div>
+          <span class="count-pill" id="courseCount">0 ta</span>
+        </div>
+        <div class="course-list" id="courseList">
+          <div class="skeleton"></div><div class="skeleton"></div>
+        </div>
+        <div id="purchaseHistory"></div>
+      </section>
+
+      <section class="view" id="profileView">
+        <button class="back-button" type="button" data-go-home><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Ortga</button>
+        <p class="eyebrow eyebrow--dark">Shaxsiy kabinet</p>
+        <h2>Profil</h2>
+        <article class="profile-card">
+          <div class="profile-card__avatar" id="profileAvatar">N</div>
+          <div><h3 id="profileName">—</h3><p id="profilePhone">—</p></div>
+        </article>
+        <div class="notice-card">
+          <span class="notice-card__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 12 3 3 7-7"/></svg></span>
+          <div><strong>Davomat xabarlari yoqilgan</strong><p>Darsdagi holatingiz Telegram orqali yuboriladi.</p></div>
+        </div>
+        <button class="legal-link" type="button" id="viewTerms"><span>Foydalanish shartlari</span><small>Amaldagi hujjatni ko‘rish</small><strong>→</strong></button>
+      </section>
+
+      <section class="view" id="checkoutView">
+        <button class="back-button" type="button" id="checkoutBack"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Kurslarga qaytish</button>
+        <div class="step-kicker">1 / 3 · Kurs va ishtirokchilar</div>
+        <h2 id="checkoutCourse">Kurs</h2>
+        <p class="muted">Kimlar uchun xarid qilmoqchisiz?</p>
+        <div class="segment" role="radiogroup" aria-label="Xarid turi">
+          <button type="button" class="segment__item is-active" data-purchase-type="self">O‘zim uchun</button>
+          <button type="button" class="segment__item" data-purchase-type="family">Oila bilan</button>
+        </div>
+        <div class="self-row" id="selfParticipant"></div>
+        <div class="family-area" id="familyArea" hidden>
+          <div class="family-heading"><h3>Oila a’zolari</h3><span>7 tagacha</span></div>
+          <div id="familyMembers"></div>
+          <button type="button" class="secondary-button" id="addFamilyMember">+ Oila a’zosini qo‘shish</button>
+        </div>
+        <div class="sticky-total">
+          <div><small>Jami</small><strong id="liveTotal">0 UZS</strong><span id="participantLabel">1 ishtirokchi</span></div>
+          <button type="button" class="primary-button" id="continueToPayment">Davom etish →</button>
+        </div>
+      </section>
+
+      <section class="view" id="paymentView">
+        <button class="back-button" type="button" id="paymentBack"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Ishtirokchilar</button>
+        <div class="step-kicker">2 / 3 · To‘lov</div>
+        <div class="payment-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/></svg></div>
+        <h2>To‘lovga tayyor</h2>
+        <p class="muted">Ma’lumotlarni tekshiring va to‘lovni tasdiqlang.</p>
+        <article class="summary-card" id="paymentSummary"></article>
+        <button class="legal-link legal-link--confirmed" type="button" id="viewContract"><span>Shartnoma qabul qilindi</span><small id="contractVersionLabel">Elektron tasdiq saqlandi</small><strong>Ko‘rish</strong></button>
+        <div class="demo-note"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span><p id="paymentNote">To‘lov Multicard orqali amalga oshiriladi.</p></div>
+        <p class="muted" id="paymentStatus" role="status" aria-live="polite"></p>
+        <button type="button" class="continue-button" id="checkPayment" hidden>To‘lov holatini tekshirish</button>
+        <button type="button" class="primary-button primary-button--wide" id="payButton">To‘lovni amalga oshirish</button>
+      </section>
+
+      <section class="view" id="questionnaireView">
+        <div class="step-kicker">3 / 3 · Majburiy anketa</div>
+        <h2>Anketani to‘ldiring</h2>
+        <p class="muted">Kursni faollashtirish uchun har bir ishtirokchi ma’lumotlari kerak.</p>
+        <form id="questionnaireForm">
+          <div id="questionnaireMembers"></div>
+          <button class="primary-button primary-button--wide" type="submit">Anketani yakunlash</button>
+        </form>
+      </section>
+
+      <section class="view success-view" id="successView">
+        <div class="success-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 4 4 8-9"/></svg></div>
+        <p class="eyebrow eyebrow--dark">Hammasi tayyor</p>
+        <h2>Ro‘yxatdan o‘tish yakunlandi</h2>
+        <p>To‘lov va anketa qabul qilindi. Keyingi ma’lumotlarni Telegram orqali yuboramiz.</p>
+        <button class="primary-button primary-button--wide" type="button" data-go-home>Bosh sahifaga qaytish</button>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Asosiy menyu">
+      <button type="button" class="is-active" data-nav="home"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 8-7 8 7v9h-5v-6H9v6H4z"/></svg>Bosh sahifa</button>
+      <button type="button" data-nav="courses"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 7 9-4 9 4-9 4zM6 9.5V15c3.5 2.5 8.5 2.5 12 0V9.5M21 8v7"/></svg>Kurslar</button>
+      <button type="button" data-nav="profile"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 21c.8-4.3 3.3-6.5 7.5-6.5s6.7 2.2 7.5 6.5"/></svg>Profil</button>
+    </nav>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="{% static 'main/js/telegram-app.js' %}"></script>
+</body>
+</html>

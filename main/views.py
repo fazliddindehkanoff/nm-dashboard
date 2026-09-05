@@ -4,7 +4,10 @@ from urllib.parse import parse_qs, urlparse
 from django.shortcuts import render
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import admin
-from .models import Expense, Operator, RoleConfiguration, Transaction, TransactionClient, Client, Group
+from .models import (
+    Client, Expense, Group, Operator, RoleConfiguration, TelegramCampaign,
+    TelegramUser, Transaction, TransactionClient,
+)
 from .permissions import is_operator, is_owner, permission_required
 from django.db.models import Sum, Count
 from datetime import datetime
@@ -15,8 +18,8 @@ from datetime import timedelta
 
 # Pie/doughnut chart uchun rang palitrasi
 CHART_COLORS = [
-    "#111827", "#374151", "#4b5563", "#6b7280", "#9ca3af",
-    "#030712", "#1f2937", "#525252", "#737373", "#a3a3a3",
+    "#3BC9D4", "#00213D", "#0B8695", "#7BE2E8", "#19AEBB",
+    "#086A79", "#AFEFF3", "#263B4C", "#657F92", "#D5F7F9",
 ]
 
 
@@ -167,6 +170,26 @@ def dashboard_callback(request, context):
         amounts.append(float(entry['total_amount'] or 0))
         counts.append(entry['count'])
 
+    try:
+        campaign_stats = TelegramCampaign.objects.aggregate(
+            sent=Sum('sent_count'), queued=Sum('queued_count'),
+            failed=Sum('failed_count'), blocked=Sum('blocked_count'),
+        )
+        telegram_stats = {
+            'subscribers': TelegramUser.objects.count(),
+            'ready': TelegramUser.objects.filter(onboarding_step=TelegramUser.STEP_READY).count(),
+            'campaigns': TelegramCampaign.objects.count(),
+            'sent': campaign_stats['sent'] or 0,
+            'queued': campaign_stats['queued'] or 0,
+            'failed': campaign_stats['failed'] or 0,
+            'blocked': campaign_stats['blocked'] or 0,
+        }
+    except Exception:
+        telegram_stats = {
+            'subscribers': 0, 'ready': 0, 'campaigns': 0, 'sent': 0,
+            'queued': 0, 'failed': 0, 'blocked': 0,
+        }
+
     context.update({
         "is_plain_operator": is_plain_op,
         "total_income": confirmed_transactions.aggregate(total=Sum('amount'))['total'] or 0,
@@ -186,6 +209,7 @@ def dashboard_callback(request, context):
             if not is_plain_op else Operator.objects.filter(id=request.user.operator.id)
         ),
         "is_owner_view": owner_view,
+        "telegram_stats": telegram_stats,
         "months": [
             (1, "Yanvar", monthly_counts.get(1, 0)),
             (2, "Fevral", monthly_counts.get(2, 0)),

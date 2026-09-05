@@ -40,12 +40,30 @@ _load_local_env(BASE_DIR / ".env")
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-#2nen21%j#(5j@=@e-t!ep!z*p70w36ni%e$he0a4$$)b+)7o&'
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-#2nen21%j#(5j@=@e-t!ep!z*p70w36ni%e$he0a4$$)b+)7o&',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', 'true').strip().lower() in {'1', 'true', 'yes', 'on'}
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get('DJANGO_ALLOWED_HOSTS', '*').split(',')
+    if host.strip()
+]
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',')
+    if origin.strip()
+]
+
+# Production Nginx HTTPS ni tugatadi va X-Forwarded-Proto sarlavhasini uzatadi.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
 
 
 # Application definition
@@ -172,6 +190,25 @@ AMOCRM = {
 TELEGRAM = {
     "BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
     "CHAT_ID": os.environ.get("TELEGRAM_CHAT_ID", ""),
+    "WEB_APP_URL": os.environ.get("TELEGRAM_WEB_APP_URL", ""),
+    "WEBHOOK_SECRET": os.environ.get("TELEGRAM_WEBHOOK_SECRET", ""),
+}
+
+# Multicard hosted checkout. Keep disabled until merchant configuration is complete.
+MULTICARD = {
+    'ENABLED': os.environ.get('MULTICARD_ENABLED', '').lower() in {'1', 'true', 'yes'},
+    'BASE_URL': os.environ.get('MULTICARD_BASE_URL', 'https://dev-mesh.multicard.uz'),
+    'APPLICATION_ID': os.environ.get('MULTICARD_APPLICATION_ID', ''),
+    'SECRET': os.environ.get('MULTICARD_SECRET', ''),
+    'STORE_ID': os.environ.get('MULTICARD_STORE_ID', ''),
+    'CALLBACK_URL': os.environ.get(
+        'MULTICARD_CALLBACK_URL',
+        'https://crm.norbekovmarkazi.uz/payments/multicard/callback/',
+    ),
+    'RETURN_URL': os.environ.get('MULTICARD_RETURN_URL', ''),
+    'OFD_MXIK': os.environ.get('MULTICARD_OFD_MXIK', ''),
+    'OFD_PACKAGE_CODE': os.environ.get('MULTICARD_OFD_PACKAGE_CODE', ''),
+    'OFD_VAT': os.environ.get('MULTICARD_OFD_VAT', ''),
 }
 
 
@@ -201,7 +238,14 @@ UNFOLD = {
     "SITE_TITLE": "Norbekov Markazi",
     "SITE_HEADER": "Norbekov Markazi",
     "SITE_URL": "/",
-    "SITE_SYMBOL": "medication",
+    "SITE_LOGO": {
+        "light": "/static/main/brand/norbekov-logo-light.svg",
+        "dark": "/static/main/brand/norbekov-logo-dark.svg",
+    },
+    "SITE_ICON": {
+        "light": "/static/main/brand/norbekov-mark.svg",
+        "dark": "/static/main/brand/norbekov-mark.svg",
+    },
     "DASHBOARD_CALLBACK": "main.views.dashboard_callback",
     # DIQQAT: unfold 0.67 bu qiymatlarni to'g'ridan-to'g'ri `var(--color-primary-600)`
     # ichiga qo'yadi va CSS rangi sifatida ishlatadi. Shuning uchun ular haqiqiy CSS
@@ -211,32 +255,32 @@ UNFOLD = {
         # Dorixona/tibbiyotga mos to'q ko'k-yashil (teal) palitra. 600 qiymati
         # oq matn bilan WCAG AA dan o'tadigan darajada to'q tanlangan.
         "primary": {
-            "50": "#f0fdfa",
-            "100": "#d9f7f0",
-            "200": "#a7ece0",
-            "300": "#6ddac9",
-            "400": "#34c1ad",
-            "500": "#14a394",
-            "600": "#0f766e",
-            "700": "#115e59",
-            "800": "#134e4a",
-            "900": "#10403d",
-            "950": "#062e2c",
+            "50": "#eefcfd",
+            "100": "#d5f7f9",
+            "200": "#afeff3",
+            "300": "#7be2e8",
+            "400": "#3bc9d4",
+            "500": "#19aebb",
+            "600": "#0b8695",
+            "700": "#086a79",
+            "800": "#075361",
+            "900": "#073f4b",
+            "950": "#00213d",
         },
         # Neytral kulrang ohangga bir oz iliqlik/ko'klik qo'shiladi — sof qora-oq
         # o'rniga yumshoqroq fon beradi.
         "base": {
-            "50": "#f7f9f9",
-            "100": "#eef2f2",
-            "200": "#dfe6e6",
-            "300": "#c5d0d1",
-            "400": "#94a4a5",
-            "500": "#697a7b",
-            "600": "#4e5f60",
-            "700": "#3c4b4c",
-            "800": "#25302f",
-            "900": "#161e1e",
-            "950": "#0b1111",
+            "50": "#f7fafc",
+            "100": "#edf3f7",
+            "200": "#dce7ee",
+            "300": "#bfd0dc",
+            "400": "#8ba5b7",
+            "500": "#657f92",
+            "600": "#4c6374",
+            "700": "#3d505f",
+            "800": "#263b4c",
+            "900": "#122b40",
+            "950": "#00213d",
         },
     },
     "SIDEBAR": {
@@ -288,6 +332,30 @@ UNFOLD = {
                         "icon": "people",
                         "link": "/admin/main/client/",
                         "permission": "main.permissions.can_view_clients",
+                    },
+                    {
+                        "title": "Telegram foydalanuvchilar",
+                        "icon": "send",
+                        "link": "/admin/main/telegramuser/",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                    {
+                        "title": "Reklama va xabarlar",
+                        "icon": "campaign",
+                        "link": "/admin/main/telegramcampaign/",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                    {
+                        "title": "Mini App xaridlari",
+                        "icon": "shopping_bag",
+                        "link": "/admin/main/miniapppurchase/",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                    {
+                        "title": "Yuridik roziliklar",
+                        "icon": "verified_user",
+                        "link": "/admin/main/legalacceptance/",
+                        "permission": "main.permissions.can_manage_users",
                     },
                     {
                         "title": "Foydalanuvchilar",

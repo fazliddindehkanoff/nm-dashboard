@@ -1,0 +1,145 @@
+<article class="legal-document legal-document--contract">
+  <div class="legal-document__purchase">
+    <p><span>Shartnoma</span><strong>№ {{ purchase.uuid }}</strong></p>
+    <p><span>Sana</span><strong>{{ contract_date|date:"d.m.Y" }}</strong></p>
+    <p><span>Buyurtmachi</span><strong>{{ purchase.telegram_user.full_name }}</strong></p>
+    <p><span>Telefon</span><strong>{{ purchase.telegram_user.phone_number }}</strong></p>
+    <p><span>Kurs</span><strong>{{ purchase.course.name }}</strong></p>
+    <p><span>Ishtirokchilar</span><strong>{{ purchase.participant_count }} kishi</strong></p>
+    <p><span>Jami xizmat haqi</span><strong>{{ purchase.total_amount|floatformat:0 }} UZS</strong></p>
+  </div>
+
+  <p class="legal-document__lead">«Norbekov sog‘lomlashtirish va maslahat markazi» MChJ nomidan Ustav asosida faoliyat yurituvchi direktor SHARIPOV MUSULMONKUL XAMZAYEVICH (keyingi o‘rinlarda «Ijrochi») bir tomondan va yuqorida ko‘rsatilgan Buyurtmachi ikkinchi tomondan, birgalikda «Taraflar» deb yuritiluvchilar quyidagi shartlarda ushbu Shartnomani tuzdilar.</p>
+
+  <h3>I. Shartnoma predmeti</h3>
+  <p><strong>1.1.</strong> Ijrochi ushbu shartnoma asosida Buyurtmachiga ong orqali o‘z sog‘lig‘ini tiklashni va o‘zini o‘zi davolashni “Norbekov tizimi” asosida o‘rgatish va maslahat berish xizmatlarini ko‘rsatish, Buyurtmachi esa mazkur xizmatlar uchun haq to‘lash majburiyatini oladi.</p>
+  <p><strong>1.2.</strong> Ijrochi tomonidan ko‘rsatiladigan xizmatlar o‘quv xususiyatiga ega bo‘lib, sog‘lom turmush tarzi, meditatsiya, to‘g‘ri nafas olish texnikalari va boshqa farovonlik (wellness coaching) amaliyotlariga yo‘naltirilgan.</p>
+  <p><strong>1.3.</strong> Ijrochi Buyurtmachiga tibbiy-davolash xizmatlarini ko‘rsatish majburiyatini olmaydi.</p>
+
+  <h3>II. Shartnomaning umumiy qoidalari</h3>
+  <p><strong>2.1.</strong> Xizmatlar quyidagilarni o‘z ichiga oladi:</p>
+  <p><strong>2.1.1.</strong> Ong orqali o‘zini o‘zi davolash bo‘yicha treninglar va mashg‘ulotlar: Ijrochi ong orqali sog‘liqni tiklash va o‘zini o‘zi davolash usullarini o‘rgatish bo‘yicha treninglar, seminarlar va amaliy mashg‘ulotlar o‘tkazadi. Ushbu mashg‘ulotlar orqali Buyurtmachiga o‘z tanasi va ongi bilan qanday qilib to‘g‘ri munosabatda bo‘lish, salomatligini yaxshilash uchun kerakli qadamlar o‘rgatiladi.</p>
+  <p><strong>2.1.2.</strong> Individual va jamoaviy konsultatsiyalar: har bir mijozga individual hamda jamoaviy yondashuv asosida maslahatlar beriladi, ularning shaxsiy ehtiyojlari va holatlarini inobatga olib, sog‘liqni tiklash va o‘zini o‘zi davolash uchun maxsus tavsiyalar ishlab chiqiladi.</p>
+  <p><strong>2.1.3.</strong> Amaliy ko‘nikmalarni rivojlantirish: ong orqali o‘zini o‘zi davolash texnikalarini amalda qo‘llash, xususan, nafas olish mashqlari, meditatsiya, ongni boshqarish usullari va boshqa tabiiy davolash usullari o‘rgatiladi.</p>
+  <p><strong>2.2.</strong> Ushbu sanab o‘tilgan xizmatlar bir nechta bosqichlarga bo‘lingan holda ko‘rsatiladi.</p>
+  <p><strong>2.3.</strong> Ijrochi tomonidan taqdim etiladigan xizmatlar yuqorida ko‘rsatilgan hamda o‘zining maxsus dasturlarida belgilangan tartibda va hajmda, Buyurtmachining talablariga muvofiq ravishda amalga oshiriladi.</p>
+
+  <h3>III. Xizmatlar narxi va ularni to‘lash tartibi</h3>
+  <p><strong>3.1.</strong> Ijrochi tomonidan Buyurtmachiga ko‘rsatiladigan xizmatlar haqi ushbu xarid ma’lumotlarida ko‘rsatilgan jami summani tashkil etadi.</p>
+  <p><strong>3.2.</strong> To‘lov Telegram Mini App’da taqdim etilgan to‘lov usuli orqali amalga oshiriladi.</p>
+  <p><strong>3.3.</strong> Buyurtmachi xizmat haqini kursdagi joy tasdiqlanishidan oldin amalga oshirishi lozim.</p>
+
+  <h3>IV. Xizmatlarning turi va davomiyligi</h3>
+  <p><strong>4.1.</strong> “Norbekov tizimi” asosida ko‘rsatiladigan xizmat turi — <strong>{{ purchase.course.name }}</strong>.</p>
+  <p><strong>4.2.</strong> Ushbu shartnomaviy munosabatga kirish orqali Taraflar Buyurtmachi o‘z hayotida xulq-atvor o‘zgarishi yoki salomatligida ma’lum bir yaxshilanishlarni amalga oshirishni xohlashini e’tirof etadilar. Bunday o‘zgarishlarni amalga oshirish va davom ettirish ko‘pincha vaqt talab qiladi; o‘zgarishlar sur’ati noaniq bo‘lib, har bir kishiga qarab farq qiladi.</p>
+  <p>Yuqorida qayd etilgan maqsadlarga erishish uchun Taraflar <strong>{{ purchase.course.number_of_days }} kunlik</strong> dastur bo‘yicha shartnomaviy munosabatga kirishadilar.</p>
+
+  <h3>V. Buyurtmachining huquq va majburiyatlari</h3>
+  <p><strong>5.1. Buyurtmachi quyidagi huquqlarga ega:</strong></p>
+  <p><strong>5.1.1.</strong> Ijrochidan xizmatlarni shartnomada ko‘rsatilgan tartibda va sifatda ko‘rsatishni talab qilish.</p>
+  <p><strong>5.1.2.</strong> Ko‘rsatilayotgan xizmatlar, o‘rgatilayotgan usullar, texnikalar va ularning sog‘lig‘iga ta’siri haqida to‘liq va tushunarli ma’lumot olish, savollar berish va javob olish.</p>
+  <p><strong>5.1.3.</strong> Agar Ijrochining aybli xatti-harakatlari tufayli shartnoma shartlariga rioya qilinmasa, xizmatlardan voz kechish va to‘lovni qaytarishni talab qilish.</p>
+  <p><strong>5.1.4.</strong> O‘zining shaxsiy ma’lumotlari, sog‘lig‘i holati va xizmatlar jarayonida to‘plangan boshqa ma’lumotlar maxfiy saqlanishini talab qilish.</p>
+  <p><strong>5.1.5.</strong> Jarayonda xavfsizlik ta’minlanishini, sanitariya va gigiyena me’yorlariga rioya qilinishini talab qilish.</p>
+  <p><strong>5.2. Buyurtmachi quyidagilarga majbur:</strong></p>
+  <p><strong>5.2.1.</strong> Xizmatlar davomida Ijrochining barcha ko‘rsatmalariga qat’iy rioya qilish.</p>
+  <p><strong>5.2.2.</strong> Shartnomada belgilangan muddatlarda va tartibda xizmatlar uchun to‘lovlarni to‘liq hajmda amalga oshirish.</p>
+  <p><strong>5.2.3.</strong> Trening va mashg‘ulotlarda faol ishtirok etish, o‘zini o‘zi davolash usullarini o‘rganishga kirishish.</p>
+  <p><strong>5.2.4.</strong> Ijrochiga o‘z sog‘lig‘ining holati, mavjud kasalliklar, allergiyalar yoki jarayonlarga ta’sir qilishi mumkin bo‘lgan boshqa sharoitlar haqida to‘liq va haqqoniy ma’lumot berish.</p>
+  <p><strong>5.2.5.</strong> Kelishilgan mashg‘ulot va konsultatsiyalar jadvaliga qat’iy rioya qilish va kelishilgan vaqtlarda qatnashish.</p>
+  <p><strong>5.2.6.</strong> Taqdim etilgan materiallar va jihozlarni ehtiyotkorlik bilan ishlatish va ularga zarar yetkazmaslik.</p>
+  <p><strong>5.2.7.</strong> Jarayonda o‘zining shaxsiy xavfsizligini ta’minlash, ko‘rsatmalarni diqqat bilan tinglash va ehtiyotkor bo‘lish.</p>
+  <p><strong>5.2.8.</strong> Ijrochining hududida odob-axloq, jamiyatda yurish-turish va etiket normalariga amal qilish.</p>
+  <p><strong>5.2.9.</strong> Amaldagi qonunchilik hamda Taraflarning o‘zaro kelishuviga muvofiq Buyurtmachi boshqa huquqlarga ham ega bo‘lishi mumkin.</p>
+
+  <h3>VI. Ijrochining huquq va majburiyatlari</h3>
+  <p><strong>6.1. Ijrochining huquqlari:</strong></p>
+  <p><strong>6.1.1.</strong> Buyurtmachidan ushbu shartnoma shartlariga hamda maxsus dasturda ko‘rsatilgan barcha shartlarga rioya qilishni talab qilish.</p>
+  <p><strong>6.1.2.</strong> Ko‘rsatiladigan xizmatlar uchun shartnomada nazarda tutilgan muddatda va miqdorda to‘lovni olish.</p>
+  <p><strong>6.1.3.</strong> Buyurtmachi shartlarga rioya qilmasa yoki to‘lovni o‘z vaqtida amalga oshirmasa, xizmatlarni to‘xtatish yoki xizmat ko‘rsatishni rad etish.</p>
+  <p><strong>6.1.4.</strong> Xizmatlar sifatini ta’minlash uchun zarur qo‘shimcha choralar ko‘rish va xizmatlarni taqdim etish sharoitlarini yaxshilash.</p>
+  <p><strong>6.1.5.</strong> Trening va mashg‘ulotlar shakli, tartibi va davomiyligini Buyurtmachining ehtiyojlari va xizmat ko‘rsatish sharoitlariga ko‘ra mustaqil belgilash.</p>
+  <p><strong>6.1.6.</strong> Amaldagi qonunchilik hamda Taraflarning o‘zaro kelishuviga ko‘ra boshqa huquqlarga ega bo‘lish.</p>
+  <p><strong>6.2. Ijrochi quyidagilarga majbur:</strong></p>
+  <p><strong>6.2.1.</strong> Buyurtmachiga xizmatlarni belgilangan tartibda va sifatda ko‘rsatish.</p>
+  <p><strong>6.2.2.</strong> Buyurtmachining shaxsiy ma’lumotlari, sog‘lig‘i va uning holati haqidagi ma’lumotlarni maxfiy saqlash.</p>
+  <p><strong>6.2.3.</strong> Xizmatlar ko‘rsatish jarayonida sanitariya-gigiyena me’yorlariga qat’iy rioya qilish.</p>
+  <p><strong>6.2.4.</strong> Buyurtmachining xizmatlar va usullar bo‘yicha savollariga javob berish va kerakli maslahatlar berish.</p>
+  <p><strong>6.2.5.</strong> Xizmatlarni to‘liq va sifatli ko‘rsatish uchun zarur materiallar va jihozlarni o‘z hisobidan ta’minlash.</p>
+  <p><strong>6.2.6.</strong> Xizmat ko‘rsatish jarayonini Buyurtmachining ehtiyojlari va xohishlariga muvofiq amalga oshirish, vaqt va joyni oldindan kelishib olish.</p>
+  <p><strong>6.2.7.</strong> Xizmat ko‘rsatish jarayonida odob-axloq, jamiyatda yurish-turish va etiket qoidalariga amal qilish.</p>
+
+  <h3>VII. Taraflarning javobgarligi</h3>
+  <p><strong>7.1.</strong> Har bir taraf ushbu Shartnoma va amaldagi qonunchilikda belgilangan talablarni buzganlik uchun javobgar bo‘ladi.</p>
+  <p><strong>7.2.</strong> Ijrochi xizmatlarni belgilangan sifat va shartlarga muvofiq ko‘rsatmasa, Buyurtmachi ushbu xizmatlar uchun to‘langan to‘lovni to‘liq yoki qisman qaytarib olishi mumkin.</p>
+  <p><strong>7.3.</strong> Agar Buyurtmachi xizmatlar uchun zarur sharoitlarni ta’minlamasa va bu Ijrochining xizmatlarni ko‘rsatishiga to‘sqinlik qilsa, Ijrochi xizmatlarni to‘xtatish yoki rad etish huquqiga ega, bunda Buyurtmachi shartnoma bo‘yicha zararlarni qoplash majburiyatini oladi.</p>
+  <p><strong>7.4.</strong> Buyurtmachi jarayonda faol ishtirok etmasa va berilgan tavsiyalarni bajarmasa, Ijrochi xizmatlarning samaradorligi uchun javobgar bo‘lmaydi hamda Buyurtmachi bu bilan bog‘liq zarar yoki natijalar uchun o‘zi javobgar bo‘ladi.</p>
+  <p><strong>7.5.</strong> Buyurtmachi Ijrochining ko‘rsatmalariga rioya qilmaganligi tufayli sog‘lig‘iga zarar yetkazsa, Ijrochi ushbu zarar uchun javobgar hisoblanmaydi. Ijrochining aybli xatti-harakatlari natijasida kelib chiqadigan holatlar bundan mustasno.</p>
+
+  <div class="legal-document__warning">
+    <h3>VIII. Alohida shartlar — sog‘liq bo‘yicha muhim ogohlantirish</h3>
+    <p><strong>8.1. Norbekov uslubi bilan quyidagi hollarda shug‘ullanish mumkin emas:</strong></p>
+    <ul>
+      <li>homiladorlik;</li>
+      <li>ruhiy kasalliklar;</li>
+      <li>trankvilizator yoki psixotrop vositalar yordamida davolanish;</li>
+      <li>alkogolizm yoki narkomaniya;</li>
+      <li>epilepsiya (tutqanoq);</li>
+      <li>bosh miya o‘smasi yoki qon-tomirlar anevrizmasi;</li>
+      <li>qattiq asabiylashish holatlari;</li>
+      <li>psixonevrologik dispanserda ro‘yxatda turish;</li>
+      <li>180/100 mm simob ustunidan yuqori arterial qon bosimi.</li>
+    </ul>
+    <p>Infarkt, insultdan keyingi holatlar, barcha jigar kasalliklari, qon bosimining 3-bosqichi, ichki a’zolar yoki ko‘zda jarrohlik operatsiyasini boshdan kechirganlar mashg‘ulotlarga faqat mutaxassis maslahatidan so‘ng kiritilishi mumkin.</p>
+    <p><strong>8.2.</strong> Buyurtmachi Ijrochi ko‘rsatiladigan xizmatlar bo‘yicha ijobiy natijaga erishish haqida aniq yoki nazarda tutilgan kafolat bermaganligini tan oladi.</p>
+  </div>
+
+  <h3>IX. Shartnomani o‘zgartirish va bekor qilish tartibi</h3>
+  <p><strong>9.1.</strong> Shartnomaga o‘zgartirish va qo‘shimchalar kiritish Taraflarning roziligiga ko‘ra qo‘shimcha bitimni rasmiylashtirish yo‘li bilan amalga oshiriladi. Bunday bitim yozma yoki qonunchilikka muvofiq elektron shaklda tasdiqlangandagina haqiqiy hisoblanadi.</p>
+  <p><strong>9.2.</strong> Taraflarning shartnoma shartlariga kiritgan qo‘shimcha va o‘zgartirishlari uning ajralmas qismi hisoblanadi.</p>
+  <p><strong>9.3.</strong> Shartnoma qonunchilik o‘zgarganda, O‘zbekiston Respublikasining qonunchilik hujjatlarida belgilangan boshqa hollarda qayta tuzilishi yoki o‘zgartirilishi mumkin.</p>
+  <p><strong>9.4.</strong> Shartnoma Taraflarning ixtiyoriy kelishuviga asosan; Buyurtmachining sog‘lig‘i Ijrochi tomonidan ko‘rsatiladigan xizmatlarni qabul qilishga imkon bermasa yoki boshqa obyektiv sabablarga ko‘ra xizmatlarni qabul qilish imkoni qolmasa; O‘zbekiston Respublikasining amaldagi qonunchilik hujjatlarida nazarda tutilgan hollarda muddatidan oldin bekor qilinishi mumkin.</p>
+
+  <h3>X. Shaxsga doir ma’lumotlar</h3>
+  <p><strong>10.1.</strong> “Shaxsga doir ma’lumotlar to‘g‘risida”gi O‘zbekiston Respublikasi Qonuni talablariga muvofiq, ushbu shartnomani qabul qilgan holda Buyurtmachi o‘ziga xizmat ko‘rsatish maqsadlarida shaxsga doir ma’lumotlarini to‘plash, qayta ishlash, saqlash, foydalanish va zarur hajmda topshirishga Ijrochiga rozilik beradi.</p>
+
+  <h3>XI. Fors-major</h3>
+  <p><strong>11.1.</strong> Ushbu shartnomada nazarda tutilgan shartlarni bajarish muddatlari, agar bajarmaslik Taraflar oldindan ko‘ra olmaydigan yoki oldini olish mumkin bo‘lmagan favqulodda vaziyatlar natijasida, ushbu shartnoma tuzilganidan keyin yuzaga kelgan fors-major holatlarining natijasi bo‘lsa, o‘zgartirilishi mumkin.</p>
+  <p><strong>11.2.</strong> Fors-major holatlari yuzaga kelsa, har bir taraf boshqa tarafni darhol yozma ravishda xabardor qilishi shart. Xabarnomada holatlarning mohiyati, ularni tasdiqlovchi rasmiy hujjatlar va imkon qadar shartnoma bo‘yicha majburiyatlarni bajarish qobiliyatiga ta’siri ko‘rsatilishi kerak.</p>
+  <p><strong>11.3.</strong> Taraf xabarnomani yubormasa yoki o‘z vaqtida yubormasa, boshqa tarafga yetkazilgan zararni qoplashi shart.</p>
+  <p><strong>11.4.</strong> Fors-major holatlari yuzaga kelganda majburiyatlarni bajarish muddati ushbu holatlar va ularning oqibatlari qo‘llaniladigan vaqtga mutanosib ravishda kechiktiriladi.</p>
+  <p><strong>11.5.</strong> Fors-major holatlari va ularning oqibatlari ikki oydan ortiq davom etsa, Taraflar shartnomani bajarishning maqbul muqobil usullarini aniqlash uchun qo‘shimcha muzokaralar olib boradilar.</p>
+
+  <h3>XII. Nizolarni tinch yo‘l bilan hal qilish</h3>
+  <p><strong>12.1.</strong> Ushbu shartnoma yuzasidan Taraflar o‘rtasida kelib chiqadigan nizolar o‘zaro muzokaralar olib borish yo‘li bilan hal etiladi.</p>
+  <p><strong>12.2.</strong> Muzokara yo‘li bilan nizoni hal etish imkoniyati bo‘lmasa, nizolar O‘zbekiston Respublikasining amaldagi qonunlariga binoan hal qilinadi.</p>
+  <p><strong>12.3.</strong> Taraflar shartnoma shartlarini bajarmagan yoki lozim darajada bajarmagan taqdirda O‘zbekiston Respublikasining amaldagi qonunlariga binoan javobgar bo‘ladilar.</p>
+
+  <h3>XIII. Shartnomaning amal qilish muddati</h3>
+  <p><strong>13.1.</strong> Shartnoma elektron ravishda qabul qilingan paytdan boshlab kuchga kiradi va Taraflar o‘z majburiyatlarini to‘liq bajargunga qadar amal qiladi.</p>
+
+  <h3>XIV. Yakuniy qoidalar</h3>
+  <p><strong>14.1.</strong> Ushbu Shartnoma elektron shaklda saqlanadi va Taraflar uchun bir xil yuridik mazmunni ifodalaydi.</p>
+  <p><strong>14.2.</strong> Shartnomadan va u bo‘yicha yuklangan majburiyatlarni bajarishdan bir tomonlama bosh tortishga yo‘l qo‘yilmaydi, bundan oldindan bilish imkoni bo‘lmagan holatlar va ushbu shartnomada keltirilgan shartlar mustasno.</p>
+  <p><strong>14.3.</strong> Shartnomada nazarda tutilmagan boshqa barcha masalalarda Taraflar O‘zbekiston Respublikasining amaldagi qonunchiligiga amal qiladilar.</p>
+  <p><strong>14.4.</strong> Mazkur shartnoma bo‘yicha ilovalar, agar mavjud bo‘lsa, uning ajralmas qismini tashkil etadi.</p>
+
+  <h3>XV. Ijrochining ma’lumotlari</h3>
+  <div class="legal-document__contact">
+    <p><strong>Ijrochi</strong><span>«NORBEKOV SOG‘LOMLASHTIRISH VA MASLAHAT MARKAZI» MChJ</span></p>
+    <p><strong>Bank</strong><span>“TIF Milliy Banki” AJ Bosh ofisi</span></p>
+    <p><strong>Hisob raqami</strong><span>2020 8000 0051 1316 7001</span></p>
+    <p><strong>MFO</strong><span>00450</span></p>
+    <p><strong>INN</strong><span>306647621</span></p>
+    <p><strong>Direktor</strong><span>Sharipov M. X.</span></p>
+  </div>
+
+  <h3>Ilova 1. So‘rovnoma</h3>
+  <p>Buyurtmachi xizmatni xavfsiz va to‘g‘ri tashkil etish uchun majburiy so‘rovnomani to‘lovdan keyin har bir ishtirokchi bo‘yicha to‘ldiradi. So‘rovnomada tug‘ilgan sana, aloqa ma’lumotlari, yashash joyi, faoliyati, kursdan maqsadi, oldingi tajribasi va muhim sog‘liq ma’lumotlari kiritiladi.</p>
+  <p>Buyurtmachi VIII bo‘limda ko‘rsatilgan tavsiya etilmagan holatlar bilan tanishganini va taqdim etilgan ma’lumotlar haqqoniyligini tasdiqlaydi.</p>
+
+  <div class="legal-document__end" data-legal-end>
+    <strong>Elektron tasdiqlash</strong>
+    <p>“Shartnomani qabul qilaman” tugmasini bosish orqali Buyurtmachi yuqoridagi xarid ma’lumotlari va shartnoma matnini o‘qib chiqqanini, sog‘liq bo‘yicha alohida shartlarni tushunganini hamda shartnomani elektron ravishda qabul qilganini tasdiqlaydi.</p>
+  </div>
+</article>

@@ -2,7 +2,9 @@ import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import Permission, User
 
@@ -46,6 +48,12 @@ class RoleConfiguration(models.Model):
 class Course(models.Model):
     name = models.CharField(_("Nomi"), max_length=255)
     price = models.DecimalField(_("Narxi"), max_digits=12, decimal_places=2)
+    number_of_days = models.PositiveSmallIntegerField(
+        _("Dars kunlari soni"),
+        default=1,
+        validators=(MinValueValidator(1), MaxValueValidator(365)),
+        help_text=_("Ushbu kurs odatda necha kun davom etishini kiriting."),
+    )
 
     class Meta:
         verbose_name = _("Kurs")
@@ -67,7 +75,13 @@ class Teacher(models.Model):
 class Group(models.Model):
     course = models.ForeignKey(Course, on_delete=models.CASCADE, verbose_name=_("Kurs"))
     teachers = models.ManyToManyField(Teacher, verbose_name=_("O'qituvchilar"), blank=True)
-    start_date = models.DateField(_("Boshlanish sanasi"), null=True)
+    start_date = models.DateField(_("Boshlanish sanasi"))
+    number_of_days = models.PositiveSmallIntegerField(
+        _("Dars kunlari soni"),
+        default=1,
+        validators=(MinValueValidator(1), MaxValueValidator(365)),
+        help_text=_("Kursdan avtomatik olinadi; ushbu guruh uchun o'zgartirish mumkin."),
+    )
     is_active = models.BooleanField(
         _("Faol"),
         default=True,
@@ -498,7 +512,13 @@ class AttendanceRecord(models.Model):
     @property
     def attended_lessons_count(self):
         prefetched = getattr(self, '_prefetched_objects_cache', {}).get('lessons')
-        return len(prefetched) if prefetched is not None else self.lessons.count()
+        attended_statuses = {
+            AttendanceLesson.STATUS_ATTENDED,
+            AttendanceLesson.STATUS_LATE,
+        }
+        if prefetched is not None:
+            return sum(lesson.status in attended_statuses for lesson in prefetched)
+        return self.lessons.filter(status__in=attended_statuses).count()
 
     def _payment_participations(self):
         return self.client.participations.filter(
@@ -532,6 +552,19 @@ class AttendanceRecord(models.Model):
 
 
 class AttendanceLesson(models.Model):
+    STATUS_UNMARKED = 'unmarked'
+    STATUS_ATTENDED = 'attended'
+    STATUS_ABSENT = 'absent'
+    STATUS_EXCUSED = 'excused'
+    STATUS_LATE = 'late'
+    STATUSES = (
+        (STATUS_UNMARKED, _("Belgilanmagan")),
+        (STATUS_ATTENDED, _("Keldi")),
+        (STATUS_ABSENT, _("Kelmadi")),
+        (STATUS_EXCUSED, _("Sababli kelmadi")),
+        (STATUS_LATE, _("Kechikdi")),
+    )
+
     attendance = models.ForeignKey(
         AttendanceRecord,
         on_delete=models.CASCADE,
@@ -539,6 +572,17 @@ class AttendanceLesson(models.Model):
         verbose_name=_("Davomat kartasi"),
     )
     date = models.DateField(_("Dars sanasi"))
+    status = models.CharField(
+        _("Darsdagi holati"),
+        max_length=16,
+        choices=STATUSES,
+        default=STATUS_ATTENDED,
+    )
+    reason = models.CharField(
+        _("Kelmaslik sababi"),
+        max_length=500,
+        blank=True,
+    )
     note = models.CharField(_("Dars bo'yicha izoh"), max_length=255, blank=True)
     marked_by = models.ForeignKey(
         User,
@@ -552,8 +596,8 @@ class AttendanceLesson(models.Model):
     created_at = models.DateTimeField(_("Belgilangan vaqt"), auto_now_add=True)
 
     class Meta:
-        verbose_name = _("Qatnashgan dars")
-        verbose_name_plural = _("Qatnashgan darslar")
+        verbose_name = _("Dars davomati")
+        verbose_name_plural = _("Dars davomati")
         ordering = ('-date', '-id')
         constraints = [
             models.UniqueConstraint(
@@ -691,6 +735,396 @@ class SubTransaction(models.Model):
             return self.reviewed_by.operator.full_name
         except Operator.DoesNotExist:
             return self.reviewed_by.get_full_name() or self.reviewed_by.username
+
+
+class TelegramUser(models.Model):
+    STEP_NAME = 'name'
+    STEP_CONTACT = 'contact'
+    STEP_READY = 'ready'
+    ONBOARDING_STEPS = (
+        (STEP_NAME, _("Ism kutilmoqda")),
+        (STEP_CONTACT, _("Kontakt kutilmoqda")),
+        (STEP_READY, _("Tayyor")),
+    )
+
+    telegram_id = models.BigIntegerField(_("Telegram ID"), unique=True)
+    username = models.CharField(_("Telegram username"), max_length=64, blank=True)
+    full_name = models.CharField(_("To'liq ism"), max_length=255, blank=True)
+    phone_number = models.CharField(_("Telefon raqami"), max_length=20, blank=True)
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='telegram_accounts',
+        verbose_name=_("CRM mijoz"),
+    )
+    onboarding_step = models.CharField(
+        _("Onboarding bosqichi"),
+        max_length=12,
+        choices=ONBOARDING_STEPS,
+        default=STEP_NAME,
+    )
+    created_at = models.DateTimeField(_("Yaratilgan vaqt"), auto_now_add=True)
+    updated_at = models.DateTimeField(_("Yangilangan vaqt"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("Telegram foydalanuvchi")
+        verbose_name_plural = _("Telegram foydalanuvchilar")
+        ordering = ('-updated_at', '-id')
+
+    def __str__(self):
+        return self.full_name or self.username or str(self.telegram_id)
+
+
+class TelegramCampaign(models.Model):
+    AUDIENCE_READY = 'ready'
+    AUDIENCE_ALL = 'all'
+    AUDIENCES = (
+        (AUDIENCE_READY, _("Onboardingni yakunlaganlar")),
+        (AUDIENCE_ALL, _("Barcha Telegram foydalanuvchilar")),
+    )
+
+    STATUS_DRAFT = 'draft'
+    STATUS_QUEUED = 'queued'
+    STATUS_SENDING = 'sending'
+    STATUS_COMPLETED = 'completed'
+    STATUS_COMPLETED_ERRORS = 'completed_errors'
+    STATUSES = (
+        (STATUS_DRAFT, _("Qoralama")),
+        (STATUS_QUEUED, _("Navbatda")),
+        (STATUS_SENDING, _("Yuborilmoqda")),
+        (STATUS_COMPLETED, _("Yakunlandi")),
+        (STATUS_COMPLETED_ERRORS, _("Xatolar bilan yakunlandi")),
+    )
+
+    title = models.CharField(
+        _("Kampaniya nomi"), max_length=160,
+        help_text=_("Faqat CRM ichida ko'rinadigan nom."),
+    )
+    message = models.TextField(
+        _("Xabar matni"), max_length=4096,
+        help_text=_("Telegram HTML formatidan foydalanish mumkin."),
+    )
+    image = models.ImageField(
+        _("Reklama rasmi"), upload_to='telegram_campaigns/%Y/%m/', blank=True, null=True,
+    )
+    button_text = models.CharField(_("Tugma matni"), max_length=64, blank=True)
+    button_url = models.URLField(_("Tugma havolasi"), blank=True)
+    button_opens_mini_app = models.BooleanField(
+        _("Tugma Mini App'ni ochadi"), default=False,
+        help_text=_("Belgilanganda Telegram foydalanuvchini tasdiqlangan Mini App oynasida ochadi."),
+    )
+    audience = models.CharField(
+        _("Qabul qiluvchilar"), max_length=12, choices=AUDIENCES, default=AUDIENCE_READY,
+    )
+    status = models.CharField(
+        _("Holati"), max_length=24, choices=STATUSES, default=STATUS_DRAFT, editable=False,
+    )
+    total_recipients = models.PositiveIntegerField(_("Jami"), default=0, editable=False)
+    queued_count = models.PositiveIntegerField(_("Navbatda"), default=0, editable=False)
+    sent_count = models.PositiveIntegerField(_("Yuborildi"), default=0, editable=False)
+    failed_count = models.PositiveIntegerField(_("Xato"), default=0, editable=False)
+    blocked_count = models.PositiveIntegerField(_("Bot bloklangan"), default=0, editable=False)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name='telegram_campaigns_created',
+        verbose_name=_("Yaratdi"), editable=False,
+    )
+    queued_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='telegram_campaigns_queued', verbose_name=_("Navbatga qo'ydi"), editable=False,
+    )
+    created_at = models.DateTimeField(_("Yaratilgan vaqt"), auto_now_add=True)
+    queued_at = models.DateTimeField(_("Navbatga qo'yilgan vaqt"), null=True, blank=True, editable=False)
+    started_at = models.DateTimeField(_("Boshlangan vaqt"), null=True, blank=True, editable=False)
+    completed_at = models.DateTimeField(_("Yakunlangan vaqt"), null=True, blank=True, editable=False)
+    updated_at = models.DateTimeField(_("Yangilangan vaqt"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("Telegram xabari")
+        verbose_name_plural = _("Telegram reklama va xabarlar")
+        ordering = ('-created_at', '-id')
+
+    def clean(self):
+        super().clean()
+        if bool(self.button_text) != bool(self.button_url):
+            raise ValidationError(_("Tugma matni va havolasini birga kiriting."))
+        if self.button_opens_mini_app and not self.button_url:
+            raise ValidationError({
+                'button_url': _("Mini App tugmasi uchun havola majburiy."),
+            })
+
+    @property
+    def processed_count(self):
+        return self.sent_count + self.failed_count + self.blocked_count
+
+    @property
+    def progress_percent(self):
+        if not self.total_recipients:
+            return 0
+        return round(self.processed_count * 100 / self.total_recipients)
+
+    def __str__(self):
+        return self.title
+
+
+class TelegramCampaignRecipient(models.Model):
+    STATUS_QUEUED = 'queued'
+    STATUS_SENDING = 'sending'
+    STATUS_SENT = 'sent'
+    STATUS_FAILED = 'failed'
+    STATUS_BLOCKED = 'blocked'
+    STATUSES = (
+        (STATUS_QUEUED, _("Navbatda")),
+        (STATUS_SENDING, _("Yuborilmoqda")),
+        (STATUS_SENT, _("Yuborildi")),
+        (STATUS_FAILED, _("Xato")),
+        (STATUS_BLOCKED, _("Bot bloklangan")),
+    )
+
+    campaign = models.ForeignKey(
+        TelegramCampaign, on_delete=models.CASCADE, related_name='recipients',
+        verbose_name=_("Kampaniya"),
+    )
+    telegram_user = models.ForeignKey(
+        TelegramUser, on_delete=models.PROTECT, related_name='campaign_deliveries',
+        verbose_name=_("Telegram foydalanuvchi"),
+    )
+    status = models.CharField(
+        _("Holati"), max_length=12, choices=STATUSES, default=STATUS_QUEUED,
+    )
+    attempts = models.PositiveSmallIntegerField(_("Urinishlar"), default=0)
+    error_message = models.CharField(_("Xato tafsiloti"), max_length=500, blank=True)
+    last_attempt_at = models.DateTimeField(_("Oxirgi urinish"), null=True, blank=True)
+    sent_at = models.DateTimeField(_("Yuborilgan vaqt"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("Telegram xabar qabul qiluvchisi")
+        verbose_name_plural = _("Telegram xabar qabul qiluvchilar")
+        ordering = ('id',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=('campaign', 'telegram_user'), name='uniq_campaign_telegram_user',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.campaign} — {self.telegram_user}"
+
+
+class MiniAppPurchase(models.Model):
+    TYPE_SELF = 'self'
+    TYPE_FAMILY = 'family'
+    PURCHASE_TYPES = (
+        (TYPE_SELF, _("O'zim uchun")),
+        (TYPE_FAMILY, _("Oila uchun")),
+    )
+
+    PAYMENT_PENDING = 'pending'
+    PAYMENT_SUCCESS = 'success'
+    PAYMENT_FAILED = 'failed'
+    PAYMENT_REFUNDED = 'refunded'
+    PAYMENT_STATUSES = (
+        (PAYMENT_PENDING, _("To'lov kutilmoqda")),
+        (PAYMENT_SUCCESS, _("To'langan")),
+        (PAYMENT_FAILED, _("To'lov amalga oshmadi")),
+        (PAYMENT_REFUNDED, _("To'lov qaytarilgan")),
+    )
+
+    uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    telegram_user = models.ForeignKey(
+        TelegramUser,
+        on_delete=models.PROTECT,
+        related_name='purchases',
+        verbose_name=_("Telegram foydalanuvchi"),
+    )
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.PROTECT,
+        related_name='mini_app_purchases',
+        verbose_name=_("Kurs"),
+    )
+    purchase_type = models.CharField(
+        _("Xarid turi"), max_length=10, choices=PURCHASE_TYPES, default=TYPE_SELF,
+    )
+    unit_price = models.DecimalField(_("Bir kishi uchun narx"), max_digits=12, decimal_places=2)
+    participant_count = models.PositiveSmallIntegerField(_("Ishtirokchilar soni"), default=1)
+    total_amount = models.DecimalField(_("Jami summa"), max_digits=14, decimal_places=2)
+    payment_status = models.CharField(
+        _("To'lov holati"), max_length=10, choices=PAYMENT_STATUSES, default=PAYMENT_PENDING,
+    )
+    payment_provider = models.CharField(
+        _("To'lov provayderi"), max_length=30, blank=True, default='',
+    )
+    payment_reference = models.CharField(_("To'lov identifikatori"), max_length=100, blank=True)
+    paid_at = models.DateTimeField(_("To'langan vaqt"), null=True, blank=True)
+    questionnaire_completed = models.BooleanField(_("Anketa yakunlangan"), default=False)
+    created_at = models.DateTimeField(_("Yaratilgan vaqt"), auto_now_add=True)
+    updated_at = models.DateTimeField(_("Yangilangan vaqt"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("Mini App xaridi")
+        verbose_name_plural = _("Mini App xaridlari")
+        ordering = ('-created_at', '-id')
+
+    def __str__(self):
+        return f"{self.telegram_user} - {self.course} - {self.total_amount}"
+
+    def mark_paid(self, reference=''):
+        self.payment_status = self.PAYMENT_SUCCESS
+        self.payment_reference = reference or f"DEMO-{self.pk}"
+        self.paid_at = timezone.now()
+        self.save(update_fields=('payment_status', 'payment_reference', 'paid_at', 'updated_at'))
+
+
+class MulticardInvoice(models.Model):
+    """One durable invoice per purchase; never recreate an ambiguous API request."""
+
+    purchase = models.OneToOneField(MiniAppPurchase, on_delete=models.PROTECT, related_name='multicard_invoice')
+    invoice_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    provider_uuid = models.UUIDField(null=True, blank=True, unique=True)
+    payment_uuid = models.UUIDField(null=True, blank=True, unique=True)
+    store_id = models.CharField(max_length=100)
+    amount = models.PositiveBigIntegerField(help_text='UZS tiyin')
+    checkout_url = models.URLField(max_length=2000, blank=True)
+    receipt_url = models.URLField(max_length=2000, blank=True)
+    state = models.CharField(max_length=20, default='creating', choices=(
+        ('creating', 'Creating'), ('ready', 'Ready'), ('uncertain', 'Needs reconciliation'),
+        ('success', 'Paid'), ('error', 'Failed'), ('revert', 'Refunded'),
+    ))
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class MiniAppPurchaseMember(models.Model):
+    RELATION_SELF = 'self'
+    RELATION_FAMILY = 'family'
+    RELATIONSHIPS = (
+        (RELATION_SELF, _("Xaridor")),
+        (RELATION_FAMILY, _("Oila a'zosi")),
+    )
+
+    purchase = models.ForeignKey(
+        MiniAppPurchase,
+        on_delete=models.CASCADE,
+        related_name='members',
+        verbose_name=_("Xarid"),
+    )
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='mini_app_enrollments',
+        verbose_name=_("CRM mijoz"),
+    )
+    full_name = models.CharField(_("To'liq ism"), max_length=255)
+    phone_number = models.CharField(_("Telefon raqami"), max_length=20)
+    relationship = models.CharField(
+        _("Ishtirokchi turi"), max_length=10, choices=RELATIONSHIPS, default=RELATION_FAMILY,
+    )
+    created_at = models.DateTimeField(_("Yaratilgan vaqt"), auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Xarid ishtirokchisi")
+        verbose_name_plural = _("Xarid ishtirokchilari")
+        ordering = ('id',)
+        constraints = [
+            models.UniqueConstraint(
+                fields=('purchase', 'phone_number'), name='uniq_purchase_member_phone',
+            ),
+        ]
+
+    def __str__(self):
+        return self.full_name
+
+
+class LegalAcceptance(models.Model):
+    DOCUMENT_TERMS = 'terms'
+    DOCUMENT_CONTRACT = 'contract'
+    DOCUMENT_TYPES = (
+        (DOCUMENT_TERMS, _("Foydalanish shartlari")),
+        (DOCUMENT_CONTRACT, _("Sog'lomlashtirish xizmatlari shartnomasi")),
+    )
+
+    telegram_user = models.ForeignKey(
+        TelegramUser,
+        on_delete=models.PROTECT,
+        related_name='legal_acceptances',
+        verbose_name=_("Telegram foydalanuvchi"),
+    )
+    purchase = models.ForeignKey(
+        MiniAppPurchase,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='legal_acceptances',
+        verbose_name=_("Xarid"),
+    )
+    document_type = models.CharField(
+        _("Hujjat turi"), max_length=16, choices=DOCUMENT_TYPES,
+    )
+    version = models.CharField(_("Hujjat versiyasi"), max_length=32)
+    document_hash = models.CharField(
+        _("Qabul qilingan matn SHA-256"), max_length=64, editable=False,
+    )
+    accepted_at = models.DateTimeField(_("Qabul qilingan vaqt"), auto_now_add=True)
+    ip_address = models.GenericIPAddressField(_("IP manzil"), null=True, blank=True)
+    user_agent = models.CharField(_("Qurilma ma'lumoti"), max_length=255, blank=True)
+
+    class Meta:
+        verbose_name = _("Yuridik rozilik")
+        verbose_name_plural = _("Yuridik roziliklar")
+        ordering = ('-accepted_at', '-id')
+        constraints = [
+            models.UniqueConstraint(
+                fields=('telegram_user', 'document_type', 'version'),
+                condition=models.Q(purchase__isnull=True),
+                name='uniq_account_legal_version',
+            ),
+            models.UniqueConstraint(
+                fields=('purchase', 'document_type', 'version'),
+                condition=models.Q(purchase__isnull=False),
+                name='uniq_purchase_legal_version',
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.document_type == self.DOCUMENT_TERMS and self.purchase_id:
+            raise ValidationError({'purchase': _("Foydalanish shartlari xaridga bog'lanmaydi.")})
+        if self.document_type == self.DOCUMENT_CONTRACT and not self.purchase_id:
+            raise ValidationError({'purchase': _("Shartnoma uchun xarid majburiy.")})
+        if self.purchase_id and self.purchase.telegram_user_id != self.telegram_user_id:
+            raise ValidationError({'purchase': _("Xarid boshqa Telegram foydalanuvchiga tegishli.")})
+
+    def __str__(self):
+        return f"{self.telegram_user} — {self.get_document_type_display()} ({self.version})"
+
+
+class EnrollmentQuestionnaire(models.Model):
+    member = models.OneToOneField(
+        MiniAppPurchaseMember,
+        on_delete=models.CASCADE,
+        related_name='questionnaire',
+        verbose_name=_("Ishtirokchi"),
+    )
+    birth_date = models.DateField(_("Tug'ilgan sana"))
+    city = models.CharField(_("Shahar / tuman"), max_length=120)
+    occupation = models.CharField(_("Kasb / faoliyat"), max_length=160, blank=True)
+    learning_goal = models.TextField(_("Kursdan maqsad"))
+    prior_experience = models.TextField(_("Oldingi tajriba"), blank=True)
+    health_notes = models.TextField(_("Muhim sog'liq izohlari"), blank=True)
+    consent = models.BooleanField(_("Ma'lumotlar to'g'riligini tasdiqladi"), default=False)
+    completed_at = models.DateTimeField(_("Yakunlangan vaqt"), default=timezone.now)
+
+    class Meta:
+        verbose_name = _("Kurs anketasi")
+        verbose_name_plural = _("Kurs anketalari")
+        ordering = ('-completed_at', '-id')
+
+    def __str__(self):
+        return f"{self.member.full_name} - {self.member.purchase.course}"
 
 
 def _sub_transactions_with_status(transaction, status):

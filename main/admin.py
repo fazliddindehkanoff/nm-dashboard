@@ -1,4 +1,5 @@
 import re
+from datetime import timedelta
 from decimal import Decimal
 
 from django import forms
@@ -31,6 +32,8 @@ from unfold.widgets import (
 from .models import (
     Course, Group, Client, Operator, Discount, Transaction, TransactionClient, SubTransaction, Teacher,
     AttendanceLesson, AttendanceRecord, Expense, RoleConfiguration,
+    EnrollmentQuestionnaire, LegalAcceptance, MiniAppPurchase, MiniAppPurchaseMember, MulticardInvoice,
+    TelegramCampaign, TelegramCampaignRecipient, TelegramUser,
     _recalc_transaction_participants, sub_transaction_shares,
 )
 from .permissions import is_operator
@@ -43,6 +46,8 @@ from .services.amocrm import (
     AmoCRMError,
 )
 from .services.telegram import send_payment_qr, TelegramNotConfigured
+from .services.telegram_campaigns import queue_campaign
+from .services.legal import CONTRACT_VERSION, TERMS_VERSION
 
 
 def _is_plain_operator(request):
@@ -99,7 +104,7 @@ def _get_or_create_client(request, client_name, client_phone):
 
 @admin.register(Course)
 class CourseAdmin(ModelAdmin):
-    list_display = ('name', 'price')
+    list_display = ('name', 'price', 'number_of_days')
     search_fields = ('name',)
 
 
@@ -114,6 +119,26 @@ class GroupForm(forms.ModelForm):
         model = Group
         fields = '__all__'
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        duration_field = self.fields['number_of_days']
+        duration_field.required = False
+        duration_field.widget.attrs['required'] = True
+        duration_field.widget.attrs['min'] = 1
+        duration_field.widget.attrs['max'] = 365
+        self.fields['start_date'].required = True
+
+        if not self.instance.pk and not self.is_bound:
+            duration_field.initial = None
+            self.initial['number_of_days'] = None
+
+    def clean(self):
+        cleaned_data = super().clean()
+        course = cleaned_data.get('course')
+        if course and not cleaned_data.get('number_of_days'):
+            cleaned_data['number_of_days'] = course.number_of_days
+        return cleaned_data
+
     def clean_teachers(self):
         teachers = self.cleaned_data.get('teachers')
         if teachers and teachers.count() > 2:
@@ -124,7 +149,10 @@ class GroupForm(forms.ModelForm):
 @admin.register(Group)
 class GroupAdmin(ModelAdmin):
     form = GroupForm
-    list_display = ('group_link', 'course', 'get_teachers', 'start_date', 'active_badge')
+    change_form_template = 'admin/main/group/change_form.html'
+    list_display = (
+        'group_link', 'course', 'get_teachers', 'start_date', 'number_of_days', 'active_badge',
+    )
     list_display_links = None
     search_fields = ('course__name', 'teachers__full_name')
     list_filter = ('is_active', 'course', 'start_date')
@@ -144,6 +172,16 @@ class GroupAdmin(ModelAdmin):
                 "<path:object_id>/attendance/<int:record_id>/status/",
                 self.admin_site.admin_view(self.attendance_status_view),
                 name="%s_%s_attendance_status" % info,
+            ),
+            path(
+                "<path:object_id>/attendance/<int:record_id>/day/<int:day_index>/",
+                self.admin_site.admin_view(self.attendance_day_status_view),
+                name="%s_%s_attendance_day_status" % info,
+            ),
+            path(
+                "course/<int:course_id>/duration/",
+                self.admin_site.admin_view(self.course_duration_view),
+                name="%s_%s_course_duration" % info,
             ),
         ]
         return custom + urls
@@ -189,6 +227,33 @@ class GroupAdmin(ModelAdmin):
                 client__operator=request.user.operator
             )
 
+        attendance_records = list(attendance_records)
+        lesson_days = []
+        attendance_rows = []
+        if group.start_date and group.number_of_days:
+            lesson_days = [
+                {
+                    'index': day_index,
+                    'number': day_index + 1,
+                    'date': group.start_date + timedelta(days=day_index),
+                }
+                for day_index in range(group.number_of_days)
+            ]
+            for record in attendance_records:
+                lessons_by_date = {lesson.date: lesson for lesson in record.lessons.all()}
+                name_parts = record.client.full_name.split()
+                attendance_rows.append({
+                    'record': record,
+                    'initials': ''.join(part[:1] for part in name_parts[:2]).upper(),
+                    'cells': [
+                        {
+                            **lesson_day,
+                            'lesson': lessons_by_date.get(lesson_day['date']),
+                        }
+                        for lesson_day in lesson_days
+                    ],
+                })
+
         context = {
             **self.admin_site.each_context(request),
             "title": str(group),
@@ -197,7 +262,10 @@ class GroupAdmin(ModelAdmin):
             "teachers": group.teachers.all(),
             "active_tab": active_tab,
             "attendance_records": attendance_records,
+            "attendance_rows": attendance_rows,
+            "lesson_days": lesson_days,
             "attendance_statuses": AttendanceRecord.STATUSES,
+            "lesson_statuses": AttendanceLesson.STATUSES,
             "can_change_attendance": request.user.has_perm('main.change_attendancerecord'),
             "change_url": reverse("admin:main_group_change", args=[group.pk]),
             "delete_url": reverse("admin:main_group_delete", args=[group.pk]),
@@ -206,6 +274,14 @@ class GroupAdmin(ModelAdmin):
             "has_delete_permission": self.has_delete_permission(request, group),
         }
         return TemplateResponse(request, "admin/main/group/detail.html", context)
+
+    def course_duration_view(self, request, course_id):
+        if not (self.has_add_permission(request) or self.has_change_permission(request)):
+            return JsonResponse({'error': _("Ruxsat yo'q.")}, status=403)
+        course = Course.objects.filter(pk=course_id).only('number_of_days').first()
+        if course is None:
+            return JsonResponse({'error': _("Kurs topilmadi.")}, status=404)
+        return JsonResponse({'number_of_days': course.number_of_days})
 
     def _ensure_group_attendance_records(self, group):
         existing_client_ids = set(
@@ -261,6 +337,59 @@ class GroupAdmin(ModelAdmin):
             'ok': True,
             'status': record.status,
             'label': str(valid_statuses[record.status]),
+        })
+
+    def attendance_day_status_view(self, request, object_id, record_id, day_index):
+        if request.method != 'POST':
+            return JsonResponse({'error': _("Faqat POST so'rovi qabul qilinadi.")}, status=405)
+        if not request.user.has_perm('main.change_attendancerecord'):
+            return JsonResponse({'error': _("Davomatni o'zgartirish huquqi yo'q.")}, status=403)
+
+        group = self.get_object(request, object_id)
+        if group is None:
+            return JsonResponse({'error': _("Guruh topilmadi.")}, status=404)
+        if not group.start_date or day_index < 0 or day_index >= group.number_of_days:
+            return JsonResponse({'error': _("Dars kuni topilmadi.")}, status=404)
+
+        records = AttendanceRecord.objects.filter(pk=record_id, group=group)
+        if _is_plain_operator(request):
+            records = records.filter(client__operator=request.user.operator)
+        record = records.first()
+        if record is None:
+            return JsonResponse({'error': _("Davomat kartasi topilmadi.")}, status=404)
+
+        status_value = request.POST.get('status', '')
+        valid_statuses = dict(AttendanceLesson.STATUSES)
+        if status_value not in valid_statuses:
+            return JsonResponse({'error': _("Noto'g'ri dars holati.")}, status=400)
+
+        reason = request.POST.get('reason', '').strip()
+        if status_value == AttendanceLesson.STATUS_EXCUSED and not reason:
+            return JsonResponse({'error': _("Kelmaslik sababini kiriting.")}, status=400)
+        if status_value != AttendanceLesson.STATUS_EXCUSED:
+            reason = ''
+
+        lesson_date = group.start_date + timedelta(days=day_index)
+        lesson, _created = AttendanceLesson.objects.update_or_create(
+            attendance=record,
+            date=lesson_date,
+            defaults={
+                'status': status_value,
+                'reason': reason,
+                'marked_by': request.user,
+            },
+        )
+        record.refresh_from_db(fields=('last_attended_at', 'updated_at'))
+        return JsonResponse({
+            'ok': True,
+            'status': lesson.status,
+            'label': str(valid_statuses[lesson.status]),
+            'reason': lesson.reason,
+            'last_attended_at': (
+                record.last_attended_at.strftime('%d.%m.%Y')
+                if record.last_attended_at else ''
+            ),
+            'attended_lessons_count': record.attended_lessons_count,
         })
 
     def has_delete_permission(self, request, obj=None):
@@ -663,7 +792,7 @@ class ExpenseAdmin(ModelAdmin):
 class AttendanceLessonInline(TabularInline):
     model = AttendanceLesson
     extra = 1
-    fields = ('date', 'note', 'marked_by')
+    fields = ('date', 'status', 'reason', 'note', 'marked_by')
     readonly_fields = ('marked_by',)
     ordering = ('-date',)
 
@@ -1992,3 +2121,268 @@ class SubTransactionAdmin(ModelAdmin):
     )
     def reject_sub_transaction_detail(self, request, object_id):
         return self._review_response(request, object_id, approve=False, detail=True)
+
+
+@admin.register(TelegramUser)
+class TelegramUserAdmin(ModelAdmin):
+    list_display = (
+        'full_name', 'phone_number', 'telegram_id', 'onboarding_step',
+        'terms_status', 'client', 'updated_at',
+    )
+    list_filter = ('onboarding_step',)
+    search_fields = ('full_name', 'phone_number', 'username', '=telegram_id')
+    readonly_fields = ('telegram_id', 'created_at', 'updated_at')
+    autocomplete_fields = ('client',)
+
+    @display(description=_("Foydalanish shartlari"), boolean=True)
+    def terms_status(self, obj):
+        return obj.legal_acceptances.filter(
+            document_type=LegalAcceptance.DOCUMENT_TERMS,
+            version=TERMS_VERSION,
+            purchase__isnull=True,
+        ).exists()
+
+
+@admin.register(LegalAcceptance)
+class LegalAcceptanceAdmin(ModelAdmin):
+    list_display = (
+        'telegram_user', 'document_type', 'version', 'purchase',
+        'accepted_at', 'ip_address',
+    )
+    list_filter = ('document_type', 'version', 'accepted_at')
+    search_fields = (
+        'telegram_user__full_name', 'telegram_user__phone_number',
+        'telegram_user__username', 'document_hash', '=purchase__id',
+    )
+    readonly_fields = (
+        'telegram_user', 'purchase', 'document_type', 'version', 'document_hash',
+        'accepted_at', 'ip_address', 'user_agent',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(TelegramCampaign)
+class TelegramCampaignAdmin(ModelAdmin):
+    change_list_template = 'admin/main/telegramcampaign/change_list.html'
+    list_display = (
+        'title', 'status_badge', 'audience', 'total_recipients', 'sent_count',
+        'failed_count', 'blocked_count', 'progress_display', 'created_at',
+    )
+    list_filter = ('status', 'audience', 'created_at')
+    search_fields = ('title', 'message')
+    actions = ('queue_selected_campaigns',)
+    readonly_fields = (
+        'status', 'statistics_panel', 'created_by', 'queued_by', 'created_at',
+        'queued_at', 'started_at', 'completed_at', 'updated_at',
+    )
+    fieldsets = (
+        (_("Xabar"), {'fields': ('title', 'message', 'image')}),
+        (_("Harakat tugmasi"), {
+            'fields': ('button_text', 'button_url', 'button_opens_mini_app'),
+            'description': _("Tugma kerak bo'lmasa maydonlarni bo'sh qoldiring."),
+        }),
+        (_("Auditoriya va yuborish"), {'fields': ('audience', 'status', 'statistics_panel')}),
+        (_("Audit"), {
+            'fields': (
+                'created_by', 'queued_by', 'created_at', 'queued_at',
+                'started_at', 'completed_at', 'updated_at',
+            ),
+            'classes': ('collapse',),
+        }),
+    )
+
+    def save_model(self, request, obj, form, change):
+        try:
+            if not obj.pk:
+                obj.created_by = request.user
+            super().save_model(request, obj, form, change)
+        except Exception:
+            self.message_user(request, _("Xabarni saqlashda xato yuz berdi."), messages.ERROR)
+            raise
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = list(super().get_readonly_fields(request, obj))
+        if obj and obj.status != TelegramCampaign.STATUS_DRAFT:
+            fields.extend((
+                'title', 'message', 'image', 'button_text', 'button_url',
+                'button_opens_mini_app', 'audience',
+            ))
+        return tuple(dict.fromkeys(fields))
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.status != TelegramCampaign.STATUS_DRAFT:
+            return False
+        return super().has_delete_permission(request, obj)
+
+    @admin.action(description=_("Tanlangan xabarlarni yuborish navbatiga qo'yish"))
+    def queue_selected_campaigns(self, request, queryset):
+        queued_campaigns = 0
+        queued_recipients = 0
+        for campaign in queryset.order_by('id'):
+            try:
+                total = queue_campaign(campaign, request.user)
+                queued_campaigns += 1
+                queued_recipients += total
+            except ValueError as exc:
+                self.message_user(request, f"{campaign.title}: {exc}", messages.WARNING)
+            except Exception as exc:
+                self.message_user(
+                    request, f"{campaign.title}: navbatga qo'yilmadi ({exc})", messages.ERROR,
+                )
+        if queued_campaigns:
+            self.message_user(
+                request,
+                _("%(campaigns)s ta kampaniya, %(recipients)s ta qabul qiluvchi navbatga qo'yildi.") % {
+                    'campaigns': queued_campaigns, 'recipients': queued_recipients,
+                },
+                messages.SUCCESS,
+            )
+
+    @display(
+        description=_("Holati"),
+        label={
+            _("Qoralama"): "info", _("Navbatda"): "warning",
+            _("Yuborilmoqda"): "warning", _("Yakunlandi"): "success",
+            _("Xatolar bilan yakunlandi"): "danger",
+        },
+    )
+    def status_badge(self, obj):
+        return obj.get_status_display()
+
+    @display(description=_("Jarayon"))
+    def progress_display(self, obj):
+        return f"{obj.progress_percent}%"
+
+    @display(description=_("Yuborish statistikasi"))
+    def statistics_panel(self, obj):
+        if not obj or not obj.pk:
+            return _("Xabar navbatga qo'yilgandan keyin statistika shu yerda chiqadi.")
+        return format_html(
+            '<div style="display:grid;grid-template-columns:repeat(5,minmax(90px,1fr));gap:10px;max-width:760px">'
+            '<div><b>{}</b><br><small>Jami</small></div>'
+            '<div><b style="color:#0b8695">{}</b><br><small>Yuborildi</small></div>'
+            '<div><b>{}</b><br><small>Navbatda</small></div>'
+            '<div><b style="color:#dc2626">{}</b><br><small>Xato</small></div>'
+            '<div><b style="color:#b45309">{}</b><br><small>Bloklangan</small></div>'
+            '</div>',
+            obj.total_recipients, obj.sent_count, obj.queued_count,
+            obj.failed_count, obj.blocked_count,
+        )
+
+    def changelist_view(self, request, extra_context=None):
+        try:
+            campaigns = TelegramCampaign.objects.all()
+            aggregate = campaigns.aggregate(
+                total_sent=models.Sum('sent_count'),
+                total_failed=models.Sum('failed_count'),
+                total_blocked=models.Sum('blocked_count'),
+                total_queued=models.Sum('queued_count'),
+            )
+            extra_context = {
+                **(extra_context or {}),
+                'telegram_stats': {
+                    'subscribers': TelegramUser.objects.count(),
+                    'ready': TelegramUser.objects.filter(
+                        onboarding_step=TelegramUser.STEP_READY,
+                    ).count(),
+                    'campaigns': campaigns.count(),
+                    'sent': aggregate['total_sent'] or 0,
+                    'queued': aggregate['total_queued'] or 0,
+                    'failed': aggregate['total_failed'] or 0,
+                    'blocked': aggregate['total_blocked'] or 0,
+                },
+            }
+        except Exception:
+            extra_context = {**(extra_context or {}), 'telegram_stats': {}}
+        return super().changelist_view(request, extra_context=extra_context)
+
+
+@admin.register(TelegramCampaignRecipient)
+class TelegramCampaignRecipientAdmin(ModelAdmin):
+    list_display = ('campaign', 'telegram_user', 'status', 'attempts', 'sent_at')
+    list_filter = ('status', 'campaign')
+    search_fields = (
+        'telegram_user__full_name', 'telegram_user__phone_number',
+        'telegram_user__username', 'campaign__title',
+    )
+    readonly_fields = (
+        'campaign', 'telegram_user', 'status', 'attempts', 'error_message',
+        'last_attempt_at', 'sent_at',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class MiniAppPurchaseMemberInline(TabularInline):
+    model = MiniAppPurchaseMember
+    extra = 0
+    autocomplete_fields = ('client',)
+    readonly_fields = ('created_at',)
+
+
+class MulticardInvoiceInline(TabularInline):
+    model = MulticardInvoice
+    extra = 0
+    can_delete = False
+    fields = ('invoice_id', 'provider_uuid', 'payment_uuid', 'amount', 'state', 'receipt_url')
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.has_perm('main.view_miniapppurchase')
+
+
+@admin.register(MiniAppPurchase)
+class MiniAppPurchaseAdmin(ModelAdmin):
+    list_display = (
+        'telegram_user', 'course', 'purchase_type', 'participant_count',
+        'total_amount', 'contract_status', 'payment_status',
+        'questionnaire_completed', 'created_at',
+    )
+    list_filter = ('payment_status', 'purchase_type', 'questionnaire_completed', 'course')
+    search_fields = (
+        'telegram_user__full_name', 'telegram_user__phone_number',
+        'members__full_name', 'members__phone_number', 'payment_reference',
+    )
+    readonly_fields = ('uuid', 'created_at', 'updated_at', 'paid_at')
+    autocomplete_fields = ('telegram_user', 'course')
+    inlines = (MiniAppPurchaseMemberInline, MulticardInvoiceInline,)
+
+    @display(description=_("Shartnoma"), boolean=True)
+    def contract_status(self, obj):
+        return obj.legal_acceptances.filter(
+            document_type=LegalAcceptance.DOCUMENT_CONTRACT,
+            version=CONTRACT_VERSION,
+        ).exists()
+
+
+@admin.register(EnrollmentQuestionnaire)
+class EnrollmentQuestionnaireAdmin(ModelAdmin):
+    list_display = ('member', 'course_name', 'city', 'completed_at')
+    list_filter = ('member__purchase__course', 'consent')
+    search_fields = ('member__full_name', 'member__phone_number', 'city', 'occupation')
+    readonly_fields = ('completed_at',)
+
+    @display(description=_("Kurs"))
+    def course_name(self, obj):
+        return obj.member.purchase.course

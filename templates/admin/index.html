@@ -72,7 +72,7 @@
     <div class="flex flex-col gap-6">
         <!-- ===== Quick Actions ===== -->
         {% if not is_owner_view %}
-        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4" aria-label="Tezkor amallar">
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4" aria-label="Tezkor amallar">
             {% if perms.main.add_transaction %}
             <a href="/admin/main/transaction/add/" aria-label="Yangi to'lov yaratish" title="Yangi to'lov yaratish" class="bg-white flex items-center gap-3 overflow-hidden p-4 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 hover:border-base-400 transition-colors">
                 <span class="material-symbols-outlined text-base-500" aria-hidden="true">add_card</span>
@@ -98,7 +98,40 @@
                 <span class="material-symbols-outlined text-base-500" aria-hidden="true">payments</span>
                 <span class="font-medium text-sm text-font-important-light dark:text-font-important-dark">Maoshlar</span>
             </a>
+            {% if perms.main.add_telegramcampaign %}
+            <a href="/admin/main/telegramcampaign/add/" aria-label="Telegram xabari yaratish" title="Telegram xabari yaratish" class="bg-primary-50 flex items-center gap-3 overflow-hidden p-4 rounded-default shadow-xs dark:bg-primary-950 dark:border-primary-800 border border-primary-200 hover:border-primary-400 transition-colors">
+                <span class="material-symbols-outlined text-primary-700 dark:text-primary-300" aria-hidden="true">campaign</span>
+                <span class="font-medium text-sm text-primary-900 dark:text-primary-100">Telegram xabari</span>
+            </a>
+            {% endif %}
         </div>
+        {% endif %}
+
+        {% if perms.main.view_telegramcampaign %}
+        <section class="bg-primary-950 border border-primary-900 overflow-hidden p-6 relative rounded-default text-white">
+            <div class="absolute border-[18px] border-primary-400/10 h-40 -right-16 -top-16 rounded-full w-40"></div>
+            <div class="flex flex-col gap-5 relative">
+                <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                        <p class="font-semibold text-primary-300 text-xs tracking-[0.18em] uppercase">Telegram aloqa markazi</p>
+                        <h2 class="font-semibold mt-1 text-xl">Reklama va xabarlar statistikasi</h2>
+                    </div>
+                    <a href="/admin/main/telegramcampaign/" class="border border-primary-700 flex font-medium gap-2 items-center justify-center px-4 py-2 rounded-default text-sm hover:border-primary-400">
+                        Barcha kampaniyalar
+                        <span class="material-symbols-outlined text-base" aria-hidden="true">arrow_forward</span>
+                    </a>
+                </div>
+                <div class="gap-3 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
+                    <div><small class="text-primary-200">Obunachilar</small><strong class="block mt-1 text-2xl">{{ telegram_stats.subscribers }}</strong></div>
+                    <div><small class="text-primary-200">Tayyor profil</small><strong class="block mt-1 text-2xl">{{ telegram_stats.ready }}</strong></div>
+                    <div><small class="text-primary-200">Kampaniyalar</small><strong class="block mt-1 text-2xl">{{ telegram_stats.campaigns }}</strong></div>
+                    <div><small class="text-primary-200">Yuborildi</small><strong class="block mt-1 text-2xl text-primary-300">{{ telegram_stats.sent }}</strong></div>
+                    <div><small class="text-primary-200">Navbatda</small><strong class="block mt-1 text-2xl">{{ telegram_stats.queued }}</strong></div>
+                    <div><small class="text-primary-200">Xato</small><strong class="block mt-1 text-2xl text-red-300">{{ telegram_stats.failed }}</strong></div>
+                    <div><small class="text-primary-200">Bloklangan</small><strong class="block mt-1 text-2xl text-amber-300">{{ telegram_stats.blocked }}</strong></div>
+                </div>
+            </div>
+        </section>
         {% endif %}
 
         <!-- ===== KPI Cards ===== -->

@@ -99,15 +99,15 @@
 
             <div class="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-base-200 dark:divide-base-800">
                 <div class="p-5">
-                    <p class="text-xs uppercase tracking-wider text-base-500 mb-3">{% trans "Qatnashgan darslar" %}</p>
+                    <p class="text-xs uppercase tracking-wider text-base-500 mb-3">{% trans "Darslar bo'yicha davomat" %}</p>
                     <div class="flex flex-wrap gap-2">
                         {% for lesson in record.lessons.all %}
-                        <span class="inline-flex items-center gap-1 bg-primary-50 text-primary-700 dark:bg-primary-950 dark:text-primary-300 px-2 py-1 rounded-default text-xs font-medium" title="{{ lesson.note|default:'' }}">
-                            <span class="material-symbols-outlined text-[14px]" aria-hidden="true">check</span>
-                            {{ lesson.date|date:"d.m.Y" }}
+                        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-default text-xs font-medium {% if lesson.status == 'attended' %}bg-primary-50 text-primary-700 dark:bg-primary-950 dark:text-primary-300{% elif lesson.status == 'absent' %}bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300{% elif lesson.status == 'excused' %}bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300{% elif lesson.status == 'late' %}bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300{% else %}bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300{% endif %}" title="{{ lesson.reason|default:lesson.note|default:'' }}">
+                            <span class="material-symbols-outlined text-[14px]" aria-hidden="true">{% if lesson.status == 'attended' %}check{% elif lesson.status == 'absent' %}close{% elif lesson.status == 'excused' %}event_busy{% elif lesson.status == 'late' %}schedule{% else %}remove{% endif %}</span>
+                            {{ lesson.date|date:"d.m.Y" }} · {{ lesson.get_status_display }}
                         </span>
                         {% empty %}
-                        <span class="text-sm text-base-500">{% trans "Hali darsga kelmagan" %}</span>
+                        <span class="text-sm text-base-500">{% trans "Hali davomat belgilanmagan" %}</span>
                         {% endfor %}
                     </div>
                 </div>

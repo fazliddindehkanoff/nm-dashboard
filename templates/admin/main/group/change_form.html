@@ -1,0 +1,43 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block extrahead %}
+{{ block.super }}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const course = document.getElementById('id_course');
+    const days = document.getElementById('id_number_of_days');
+    const durationUrlTemplate = "{% url 'admin:main_group_course_duration' 0 %}".replace(
+        '/0/', '/__course_id__/'
+    );
+    if (!course || !days) return;
+
+    async function useCourseDuration() {
+        if (!course.value) {
+            days.value = '';
+            return;
+        }
+
+        days.setAttribute('aria-busy', 'true');
+
+        try {
+            const response = await fetch(durationUrlTemplate.replace('__course_id__', course.value), {
+                headers: {'X-Requested-With': 'XMLHttpRequest'}
+            });
+            if (!response.ok) throw new Error();
+            const data = await response.json();
+            days.value = data.number_of_days;
+            days.dispatchEvent(new Event('input', {bubbles: true}));
+        } catch (error) {
+            days.value = '';
+            days.focus();
+        } finally {
+            days.removeAttribute('aria-busy');
+        }
+    }
+
+    course.addEventListener('change', useCourseDuration);
+    if (!days.value && course.value) useCourseDuration();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 92" role="img" aria-label="Norbekov Markazi">
+  <g transform="translate(3 2) scale(.75)" fill="none" stroke="#3BC9D4" stroke-width="9">
+    <circle cx="60" cy="29" r="22"/><circle cx="34" cy="79" r="22"/><circle cx="86" cy="79" r="22"/>
+  </g>
+  <text x="100" y="49" fill="#00213D" font-family="Restora Neue, Bodoni 72, Times New Roman, serif" font-size="35" font-weight="600" letter-spacing="4">NORBEKOV</text>
+  <text x="102" y="69" fill="#657F92" font-family="Arial, sans-serif" font-size="10" letter-spacing="3">SHAXSIY RIVOJLANISH MARKAZI</text>
+</svg>

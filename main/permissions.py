@@ -61,7 +61,7 @@ def can_view_clients(request):
 
 
 def can_manage_users(request):
-    return request.user.is_superuser
+    return has_role(request.user, RoleConfiguration.ROLE_ADMIN)
 
 
 def can_view_discounts(request):
