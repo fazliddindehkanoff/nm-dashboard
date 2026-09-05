@@ -247,7 +247,7 @@
     if (state.legalReadOnly) return showView(state.legalReturnView, 1);
     const button = $('#acceptContract'); button.disabled = true; button.textContent = 'Saqlanmoqda…';
     try {
-      await api(`/telegram-app/api/purchases/${state.purchase.id}/contract/accept/`, {
+      const data = await api(`/telegram-app/api/purchases/${state.purchase.id}/contract/accept/`, {
         method: 'POST',
         body: JSON.stringify({ accepted: true, version: state.legal.version }),
       });
