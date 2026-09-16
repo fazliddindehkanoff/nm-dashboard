@@ -253,7 +253,7 @@
       const paid = item.payment_status === 'success';
       const label = done ? 'Tayyor' : paid ? 'Anketa kutilmoqda' : item.payment_status_label;
       const contractLink = item.contract_accepted ? `<button type="button" class="continue-button" data-view-contract="${item.id}">Shartnomani ko‘rish</button>` : '';
-      return `<article class="purchase-card"><div class="purchase-card__head"><div><h3>${escapeHtml(item.course)}</h3><p>${item.participant_count} ishtirokchi · ${money(item.total_amount)}</p></div><span class="status status--${done ? 'success' : 'pending'}">${label}</span></div>${done ? contractLink : `<button type="button" class="continue-button" data-resume="${item.id}">Davom ettirish →</button>${contractLink}`}</article>`;
+      return `<article class="purchase-card"><div class="purchase-card__head"><div><h3>${escapeHtml(item.course)}</h3><p>${item.participant_count} ishtirokchi · ${money(item.total_amount)}</p>${item.is_booking ? `<p>To‘langan: ${money(item.paid_amount)} · Qolgan: ${money(item.payable_amount)}</p>` : ''}</div><span class="status status--${done ? 'success' : 'pending'}">${label}</span></div>${done ? contractLink : `<button type="button" class="continue-button" data-resume="${item.id}">Davom ettirish →</button>${contractLink}`}</article>`;
     }).join('')}`;
     $$('[data-resume]').forEach(button => button.addEventListener('click', () => resumePurchase(Number(button.dataset.resume))));
     $$('[data-view-contract]').forEach(button => button.addEventListener('click', () => {
@@ -315,13 +315,27 @@
   function startCheckout(courseId) {
     state.course = state.courses.find(course => course.id === courseId); state.purchase = null; state.type = 'self';
     $('#checkoutCourse').textContent = state.course.name; $$('.segment__item').forEach((node, i) => node.classList.toggle('is-active', i === 0));
-    $('#familyArea').hidden = true; $('#familyMembers').innerHTML = ''; updateTotal(); showView('checkoutView', 1);
+    $('#paymentMode').value = 'booking'; $('#familyArea').hidden = true; $('#familyMembers').innerHTML = ''; updateTotal(); showView('checkoutView', 1);
   }
 
   function updateTotal() {
     const participants = 1 + (state.type === 'family' ? $$('.family-member').length : 0);
-    $('#liveTotal').textContent = money(Number(state.course?.price || 0) * participants);
+    const price = Number(state.course?.price || 0);
+    const discount = Math.min(price, Math.max(0, ...(state.course?.participant_discounts || [])
+      .filter(rule => participants >= rule.min_participants).map(rule => Number(rule.amount))));
+    $('#liveTotal').textContent = money((price - discount) * participants);
     $('#participantLabel').textContent = `${participants} ishtirokchi`;
+    $('#discountLabel').hidden = !discount;
+    $('#discountLabel').textContent = discount ? `Chegirma: har bir kishiga −${money(discount)}` : '';
+    const bookingDiscount = Math.min(price - discount, Number(state.course?.booking_discount || 0)) * participants;
+    const minimum = Number(state.course?.minimum_booking || 100000) * participants;
+    const net = (price - discount) * participants - bookingDiscount;
+    const bookingOption = $('#paymentMode option[value="booking"]');
+    bookingOption.disabled = net < minimum;
+    if (bookingOption.disabled) $('#paymentMode').value = 'full';
+    $('#bookingQuote').textContent = $('#paymentMode').value === 'booking'
+      ? `Har bir kishi uchun kamida ${money(state.course.minimum_booking)}. ${participants} kishiga eng kam bron: ${money(minimum)}. To‘lov tasdiqlangach jami ${money(bookingDiscount)} bron chegirmasi qo‘llanadi.`
+      : 'Kursning to‘liq summasi bir martada to‘lanadi.';
   }
 
   function addFamilyMember() {
@@ -342,7 +356,7 @@
     if (members.some(member => !member.full_name || !member.phone_number)) return toast('Oila a’zolari ma’lumotlarini to‘liq kiriting.', true);
     button.disabled = true;
     try {
-      const data = await api('/telegram-app/api/purchases/', { method: 'POST', body: JSON.stringify({ course_id: state.course.id, purchase_type: state.type, members }) });
+      const data = await api('/telegram-app/api/purchases/', { method: 'POST', body: JSON.stringify({ course_id: state.course.id, purchase_type: state.type, members, payment_mode: $('#paymentMode').value }) });
       state.purchase = data.purchase; state.purchases.unshift(data.purchase); renderHistory(); openContract(data.purchase);
     } catch (error) { toast(error.message, true); } finally { button.disabled = false; }
   }
@@ -353,16 +367,41 @@
       openContract(p);
       return;
     }
-    $('#paymentSummary').innerHTML = `<div class="summary-row"><span>Kurs</span><strong>${escapeHtml(p.course)}</strong></div><div class="summary-row"><span>Xarid turi</span><strong>${escapeHtml(p.purchase_type_label)}</strong></div><div class="summary-row"><span>Ishtirokchilar</span><strong>${p.participant_count} kishi</strong></div><div class="summary-row summary-total"><span>Jami</span><strong>${money(p.total_amount)}</strong></div>`;
+    const openInvoice = ['creating', 'uncertain', 'ready', 'error'].includes(p.invoice_state);
+    const row = (label, value) => `<div class="summary-row"><span>${label}</span><strong>${value}</strong></div>`;
+    $('#paymentSummary').innerHTML = row('Kurs', escapeHtml(p.course))
+      + row('Ishtirokchilar', `${p.participant_count} kishi`)
+      + row('Kurs narxi — jami', money(Number(p.total_amount) + Number(p.discount_total || 0)))
+      + (Number(p.discount_total) > 0 ? row(escapeHtml(p.discount_name), `−${money(p.discount_total)}`) : '')
+      + (p.is_booking ? row(Number(p.paid_amount) > 0 ? 'Bron chegirmasi' : 'To‘lovdan keyingi bron chegirmasi', `−${money(p.booking_discount)}`) : '')
+      + row('To‘langan', money(p.paid_amount))
+      + row('Qolgan to‘lov', money(p.payable_amount));
     $('#contractVersionLabel').textContent = `Versiya ${p.contract_version}`;
     const demo = document.body.dataset.demo === '1';
     $('#paymentNote').textContent = demo ? 'Demo to‘lov: mablag‘ yechilmaydi.' : 'To‘lov Multicard sahifasida amalga oshiriladi. To‘lovdan keyin Telegram ilovasiga qayting.';
     $('#paymentStatus').textContent = p.invoice_state === 'uncertain' || p.invoice_state === 'creating'
       ? 'To‘lov holati aniqlanmoqda. Qayta to‘lamang; administrator bilan bog‘laning.'
       : p.payment_status_label;
-    $('#payButton').disabled = ['creating', 'uncertain', 'revert'].includes(p.invoice_state) || p.payment_status === 'refunded';
+    const finished = ['success', 'refunded'].includes(p.payment_status);
+    $('#payButton').disabled = ['creating', 'uncertain'].includes(p.invoice_state) || finished;
+    $('#payButton').hidden = finished;
+    $('#installmentField').hidden = !p.is_booking || finished;
+    const input = $('#installmentAmount');
+    const inputKey = `${p.id}:${p.paid_amount}:${openInvoice ? p.invoice_amount : 'new'}`;
+    if (input.dataset.paymentKey !== inputKey) {
+      input.value = openInvoice ? p.invoice_amount : p.minimum_payment;
+      input.dataset.paymentKey = inputKey;
+    }
+    input.min = p.minimum_payment;
+    input.max = p.payable_amount;
+    input.disabled = openInvoice;
+    $('#payRemaining').hidden = openInvoice;
+    $('#installmentHint').textContent = openInvoice
+      ? `Ochilgan to‘lov summasi: ${money(p.invoice_amount)}. Avval shu to‘lovni yakunlang.`
+      : `Eng kam: ${money(p.minimum_payment)}. Eng ko‘p: ${money(p.payable_amount)}. Bron chegirmasi bir marta qo‘llanadi.`;
     $('#checkPayment').hidden = demo || !p.invoice_state;
     $('#payButton').textContent = p.checkout_url ? 'To‘lov sahifasini ochish' : 'To‘lovni amalga oshirish';
+    $('#bookingQuestionnaire').hidden = !['partial', 'success'].includes(p.payment_status) || p.questionnaire_completed;
   }
 
   async function acceptTerms() {
@@ -405,10 +444,12 @@
   function applyPayment(purchase) {
     replacePurchase(purchase);
     if (state.purchase?.id !== purchase.id) return;
+    const previousPaid = Number(state.purchase.paid_amount || 0);
     state.purchase = purchase;
+    if (purchase.payment_status === 'partial' && Number(purchase.paid_amount) > previousPaid) toast('Bron to‘lovi qabul qilindi. Chegirma hisoblandi.');
     if (purchase.payment_status === 'success') {
       if (!$('#paymentView').classList.contains('is-active')) return;
-      if (purchase.questionnaire_completed) showView('successView', 3);
+      if (purchase.questionnaire_completed) showSuccess(purchase);
       else { renderQuestionnaires(); showView('questionnaireView', 3); }
       toast('To‘lov muvaffaqiyatli qabul qilindi.');
     } else { renderPayment(); }
@@ -416,10 +457,12 @@
 
   async function startPayment() {
     const purchaseId = state.purchase.id;
+    if (state.purchase.is_booking && !$('#installmentAmount').reportValidity()) return;
+    const payload = state.purchase.is_booking ? { amount: $('#installmentAmount').value, expected_paid: state.purchase.paid_amount } : {};
     const button = $('#payButton'); button.disabled = true; button.textContent = 'To‘lov tayyorlanmoqda…';
     try {
       const endpoint = document.body.dataset.demo === '1' ? 'demo-payment' : 'payment';
-      const data = await api(`/telegram-app/api/purchases/${purchaseId}/${endpoint}/`, { method: 'POST', body: '{}' });
+      const data = await api(`/telegram-app/api/purchases/${purchaseId}/${endpoint}/`, { method: 'POST', body: JSON.stringify(payload) });
       applyPayment(data.purchase);
       if (data.purchase.payment_status !== 'success' && data.checkout_url) {
         const url = new URL(data.checkout_url);
@@ -469,7 +512,7 @@
     const responses = $$('.questionnaire-card').map(card => ({ member_id: Number(card.dataset.memberId), birth_date: $('[name="birth_date"]', card).value, city: $('[name="city"]', card).value.trim(), occupation: $('[name="occupation"]', card).value.trim(), learning_goal: $('[name="learning_goal"]', card).value.trim(), prior_experience: $('[name="prior_experience"]', card).value.trim(), health_notes: $('[name="health_notes"]', card).value.trim(), consent: $('[name="consent"]', card).checked }));
     try {
       const data = await api(`/telegram-app/api/purchases/${state.purchase.id}/questionnaire/`, { method: 'POST', body: JSON.stringify({ responses }) });
-      state.purchase = data.purchase; replacePurchase(data.purchase); showView('successView', 3);
+      state.purchase = data.purchase; replacePurchase(data.purchase); showSuccess(data.purchase);
     } catch (error) { toast(error.message, true); } finally { button.disabled = false; }
   }
 
@@ -478,6 +521,13 @@
     if (state.purchase.payment_status === 'success') { renderQuestionnaires(); showView('questionnaireView', 3); }
     else if (!state.purchase.contract_accepted) { openContract(state.purchase); }
     else { renderPayment(); showView('paymentView', 2); }
+  }
+
+  function showSuccess(purchase) {
+    $('#successDescription').textContent = purchase.payment_status === 'partial'
+      ? `Bron va anketa qabul qilindi. Qolgan to‘lov: ${money(purchase.payable_amount)}. Bosh sahifadagi xarid orqali keyinroq to‘lashingiz mumkin.`
+      : 'To‘lov va anketa qabul qilindi. Keyingi ma’lumotlarni Telegram orqali yuboramiz.';
+    showView('successView', 3);
   }
 
   function goHome() { showView('homeView', 1); renderHistory(); setMainNav('home'); }
@@ -501,6 +551,9 @@
   }
 
   $$('.segment__item').forEach(button => button.addEventListener('click', () => { state.type = button.dataset.purchaseType; $$('.segment__item').forEach(node => node.classList.toggle('is-active', node === button)); $('#familyArea').hidden = state.type !== 'family'; if (state.type === 'family' && !$$('.family-member').length) addFamilyMember(); updateTotal(); }));
+  $('#paymentMode').addEventListener('change', updateTotal);
+  $('#payRemaining').addEventListener('click', () => { $('#installmentAmount').value = state.purchase.payable_amount; });
+  $('#bookingQuestionnaire').addEventListener('click', () => { renderQuestionnaires(); showView('questionnaireView', 3); });
   $('#addFamilyMember').addEventListener('click', addFamilyMember); $('#continueToPayment').addEventListener('click', createPurchase); $('#payButton').addEventListener('click', startPayment); $('#questionnaireForm').addEventListener('submit', submitQuestionnaire);
   $('#acceptTerms').addEventListener('click', acceptTerms); $('#acceptContract').addEventListener('click', acceptContract);
   $('#viewTerms').addEventListener('click', () => openTerms(false)); $('#viewContract').addEventListener('click', () => openContract(state.purchase, true));

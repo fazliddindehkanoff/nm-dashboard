@@ -11,6 +11,11 @@ from main.models import LegalAcceptance
 
 TERMS_VERSION = '2026-09-03'
 CONTRACT_VERSION = '2026-09-03.1'
+BOOKING_CONTRACT_VERSION = '2026-09-16.booking'
+
+
+def contract_version(purchase):
+    return BOOKING_CONTRACT_VERSION if purchase.is_booking else CONTRACT_VERSION
 
 
 def render_terms_document():
@@ -41,12 +46,12 @@ def contract_accepted(purchase):
     if prefetched is not None:
         return any(
             item.document_type == LegalAcceptance.DOCUMENT_CONTRACT
-            and item.version == CONTRACT_VERSION
+            and item.version == contract_version(purchase)
             for item in prefetched
         )
     return purchase.legal_acceptances.filter(
         document_type=LegalAcceptance.DOCUMENT_CONTRACT,
-        version=CONTRACT_VERSION,
+        version=contract_version(purchase),
     ).exists()
 
 

@@ -72,7 +72,13 @@ class Teacher(models.Model):
     def __str__(self):
         return self.full_name
 
+class GroupQuerySet(models.QuerySet):
+    def upcoming(self):
+        return self.filter(is_active=True, start_date__gt=timezone.localdate())
+
+
 class Group(models.Model):
+    objects = GroupQuerySet.as_manager()
     course = models.ForeignKey(Course, on_delete=models.CASCADE, verbose_name=_("Kurs"))
     teachers = models.ManyToManyField(Teacher, verbose_name=_("O'qituvchilar"), blank=True)
     start_date = models.DateField(_("Boshlanish sanasi"))
@@ -209,9 +215,9 @@ class Expense(models.Model):
 class Discount(models.Model):
     """Dinamik chegirmalar. Miqdorlar admin orqali boshqariladi.
 
-    `is_booking=True` bo'lgan chegirma bron to'lovlarda avtomatik qo'llanadi
-    (masalan bron uchun -200 000 so'm). Qolgan (qo'shimcha) chegirmalardan
-    to'lovga faqat bittasi qo'lda tanlanadi.
+    Booking discounts apply to reservations. Participant rules apply per
+    person when the purchase reaches the configured minimum. Other discounts
+    are selected manually; only one additional discount is applied.
     """
 
     name = models.CharField(_("Nomi"), max_length=255)
@@ -222,6 +228,16 @@ class Discount(models.Model):
         help_text=_("Belgilansa, bron to'lovlarida avtomatik qo'llanadi."),
     )
     is_active = models.BooleanField(_("Faol"), default=True)
+    course = models.ForeignKey(
+        Course, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='discounts', verbose_name=_("Kurs"),
+        help_text=_("Bo'sh bo'lsa barcha kurslarga amal qiladi."),
+    )
+    min_participants = models.PositiveSmallIntegerField(
+        _("Avtomatik chegirma uchun eng kam ishtirokchilar soni"),
+        null=True, blank=True, validators=(MinValueValidator(2),),
+        help_text=_("Masalan, 2: bir xaridda kamida 2 kishi bo'lsa, har biriga chegirma. Bo'sh bo'lsa qo'lda tanlanadi."),
+    )
 
     class Meta:
         verbose_name = _("Chegirma")
@@ -230,6 +246,32 @@ class Discount(models.Model):
 
     def __str__(self):
         return f"{self.name} (-{self.amount})"
+
+    def clean(self):
+        super().clean()
+        if self.amount is not None and self.amount < 0:
+            raise ValidationError({'amount': _("Chegirma manfiy bo'lishi mumkin emas.")})
+        if self.is_booking and self.min_participants is not None:
+            raise ValidationError({'min_participants': _("Bron va ishtirokchilar chegirmasini alohida yarating.")})
+
+    @classmethod
+    def for_course(cls, course_id):
+        return cls.objects.filter(is_active=True).filter(
+            models.Q(course_id=course_id) | models.Q(course__isnull=True),
+        )
+
+    @classmethod
+    def participant_rules(cls, course_id):
+        return cls.for_course(course_id).filter(
+            is_booking=False, min_participants__gte=2, amount__gt=0,
+        ).order_by('-amount', '-min_participants', 'pk')
+
+    @classmethod
+    def participant_discount(cls, course_id, participant_count):
+        # The best eligible rule wins; overlapping rules are never stacked.
+        return cls.participant_rules(course_id).filter(
+            min_participants__lte=participant_count,
+        ).first()
 
 class Transaction(models.Model):
     PAYMENT_TYPES = (
@@ -286,7 +328,7 @@ class Transaction(models.Model):
         null=True,
         blank=True,
         verbose_name=_("Qo'shimcha chegirma"),
-        limit_choices_to={'is_active': True, 'is_booking': False},
+        limit_choices_to={'is_active': True, 'is_booking': False, 'min_participants__isnull': True},
     )
 
     # To'lovni admin tasdiqlashi kerak.
@@ -312,30 +354,39 @@ class Transaction(models.Model):
         verbose_name_plural = _("To'lovlar")
 
     def save(self, *args, **kwargs):
-        def _dec(value):
-            return Decimal(str(value or 0))
-
         if self.group:
             self.course_price = self.group.course.price
         else:
             self.course_price = 0
 
-        # Chegirmani hisoblash: bron to'lovi bo'lsa bron chegirmasi avtomatik
-        # qo'llanadi, ustiga qo'shimcha bitta chegirma qo'shilishi mumkin.
-        booking_discount = Decimal(0)
-        if self.payment_type == 'bron':
-            booking = Discount.objects.filter(is_booking=True, is_active=True).first()
-            booking_discount = _dec(booking.amount) if booking else Decimal(0)
-        additional_discount = _dec(self.discount.amount) if self.discount else Decimal(0)
-        self.discount_total = booking_discount + additional_discount
+        self.discount_total = self.calculate_discount_total(
+            self.participants.count() if self.pk else 0,
+        )
 
         super().save(*args, **kwargs)
 
-        # Mijozlar (va ularning ulushlari/qarzi) shu tranzaksiyaga biriktirilgan
-        # bo'lsa — qayta hisoblaymiz. Yangi (hali mijozsiz) tranzaksiya uchun
-        # bu no-op: mijozlar keyinroq (inline formset orqali) biriktiriladi.
+        # Inline participants are saved afterwards and recalculated separately.
         if self.pk:
             _recalc_transaction_participants(self)
+
+    def calculate_discount_total(self, participant_count):
+        course_id = self.group.course_id if self.group else None
+        booking_discount = Decimal(0)
+        if self.payment_type == 'bron':
+            booking = Discount.for_course(course_id).filter(
+                is_booking=True,
+            ).order_by(models.F('course_id').desc(nulls_last=True), '-amount', 'pk').first()
+            if booking:
+                # Preserve legacy global booking amounts (per transaction).
+                booking_discount = Decimal(str(booking.amount)) * (participant_count if booking.course_id else 1)
+        additional_discount = Decimal(0)
+        if self.discount and self.discount.is_active and self.discount.course_id in (None, course_id):
+            additional_discount = Decimal(str(self.discount.amount))
+        if course_id and self.payment_type != 'doplata':
+            rule = Discount.participant_discount(course_id, participant_count)
+            if rule:
+                additional_discount = max(additional_discount, rule.amount * participant_count)
+        return booking_discount + additional_discount
 
     def __str__(self):
         names = ", ".join(c.full_name for c in self.clients.all()) if self.pk else ""
@@ -913,6 +964,7 @@ class TelegramCampaignRecipient(models.Model):
 
 
 class MiniAppPurchase(models.Model):
+    MIN_BOOKING_AMOUNT = Decimal('100000')
     TYPE_SELF = 'self'
     TYPE_FAMILY = 'family'
     PURCHASE_TYPES = (
@@ -921,11 +973,13 @@ class MiniAppPurchase(models.Model):
     )
 
     PAYMENT_PENDING = 'pending'
+    PAYMENT_PARTIAL = 'partial'
     PAYMENT_SUCCESS = 'success'
     PAYMENT_FAILED = 'failed'
     PAYMENT_REFUNDED = 'refunded'
     PAYMENT_STATUSES = (
         (PAYMENT_PENDING, _("To'lov kutilmoqda")),
+        (PAYMENT_PARTIAL, _("Bron qilingan — qisman to'langan")),
         (PAYMENT_SUCCESS, _("To'langan")),
         (PAYMENT_FAILED, _("To'lov amalga oshmadi")),
         (PAYMENT_REFUNDED, _("To'lov qaytarilgan")),
@@ -948,8 +1002,17 @@ class MiniAppPurchase(models.Model):
         _("Xarid turi"), max_length=10, choices=PURCHASE_TYPES, default=TYPE_SELF,
     )
     unit_price = models.DecimalField(_("Bir kishi uchun narx"), max_digits=12, decimal_places=2)
+    discount_per_person = models.DecimalField(
+        _("Bir kishi uchun chegirma"), max_digits=12, decimal_places=2, default=0,
+        editable=False,
+    )
+    discount_name = models.CharField(_("Qo'llangan chegirma"), max_length=255, blank=True, editable=False)
     participant_count = models.PositiveSmallIntegerField(_("Ishtirokchilar soni"), default=1)
     total_amount = models.DecimalField(_("Jami summa"), max_digits=14, decimal_places=2)
+    is_booking = models.BooleanField(_("Bron orqali to'lash"), default=False)
+    booking_discount = models.DecimalField(_("Bron chegirmasi (kelishilgan)"), max_digits=14, decimal_places=2, default=0, editable=False)
+    discount_amount = models.DecimalField(_("Qo'llangan chegirma"), max_digits=14, decimal_places=2, default=0, editable=False)
+    paid_amount = models.DecimalField(_("To'langan summa"), max_digits=14, decimal_places=2, default=0, editable=False)
     payment_status = models.CharField(
         _("To'lov holati"), max_length=10, choices=PAYMENT_STATUSES, default=PAYMENT_PENDING,
     )
@@ -971,16 +1034,35 @@ class MiniAppPurchase(models.Model):
         return f"{self.telegram_user} - {self.course} - {self.total_amount}"
 
     def mark_paid(self, reference=''):
+        self.discount_amount = self.booking_discount if self.is_booking else Decimal(0)
+        self.paid_amount = self.total_amount - self.discount_amount
         self.payment_status = self.PAYMENT_SUCCESS
         self.payment_reference = reference or f"DEMO-{self.pk}"
         self.paid_at = timezone.now()
-        self.save(update_fields=('payment_status', 'payment_reference', 'paid_at', 'updated_at'))
+        self.save(update_fields=('discount_amount', 'paid_amount', 'payment_status', 'payment_reference', 'paid_at', 'updated_at'))
+
+    @property
+    def remaining_amount(self):
+        return max(self.total_amount - self.discount_amount - self.paid_amount, Decimal(0))
+
+    @property
+    def payable_amount(self):
+        """Maximum next payment, including the agreed first-payment discount."""
+        discount = self.booking_discount if self.is_booking else self.discount_amount
+        return max(self.total_amount - discount - self.paid_amount, Decimal(0))
+
+    @property
+    def minimum_payment(self):
+        if not self.is_booking:
+            return self.payable_amount
+        minimum = self.MIN_BOOKING_AMOUNT * self.participant_count
+        return min(minimum, self.payable_amount) if self.paid_amount else minimum
 
 
 class MulticardInvoice(models.Model):
-    """One durable invoice per purchase; never recreate an ambiguous API request."""
+    """One durable invoice per installment; at most one unsettled checkout."""
 
-    purchase = models.OneToOneField(MiniAppPurchase, on_delete=models.PROTECT, related_name='multicard_invoice')
+    purchase = models.ForeignKey(MiniAppPurchase, on_delete=models.PROTECT, related_name='multicard_invoices')
     invoice_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     provider_uuid = models.UUIDField(null=True, blank=True, unique=True)
     payment_uuid = models.UUIDField(null=True, blank=True, unique=True)
@@ -994,6 +1076,15 @@ class MulticardInvoice(models.Model):
     ))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('purchase',),
+                condition=models.Q(state__in=('creating', 'ready', 'uncertain', 'error')),
+                name='one_open_multicard_invoice',
+            ),
+        ]
 
 
 class MiniAppPurchaseMember(models.Model):
@@ -1176,10 +1267,13 @@ def _recalc_transaction_participants(transaction):
     participants = list(
         TransactionClient.objects.filter(transaction_id=transaction.pk).order_by('id')
     )
+    n = len(participants)
+    discount_total = transaction.calculate_discount_total(n)
+    if transaction.discount_total != discount_total:
+        Transaction.objects.filter(pk=transaction.pk).update(discount_total=discount_total)
+        transaction.discount_total = discount_total
     if not participants:
         return
-
-    n = len(participants)
     # Faqat tasdiqlangan ichki to'lovlar pul sifatida hisobga olinadi.
     sub_transactions = _sub_transactions_with_status(transaction, SubTransaction.STATUS_APPROVED)
     sub_total = sum((item.amount for item in sub_transactions), Decimal(0))

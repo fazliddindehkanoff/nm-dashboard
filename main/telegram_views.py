@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import re
+import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -20,6 +21,7 @@ from .models import (
     AttendanceRecord,
     Client,
     Course,
+    Discount,
     EnrollmentQuestionnaire,
     Group,
     LegalAcceptance,
@@ -29,10 +31,11 @@ from .models import (
     Operator,
     TelegramUser,
 )
+from .services.booking import booking_discount_for, check_payment_version, payment_amount
 from .services.legal import (
-    CONTRACT_VERSION,
     TERMS_VERSION,
     contract_accepted,
+    contract_version,
     record_acceptance,
     render_contract_document,
     render_terms_document,
@@ -42,7 +45,7 @@ from .services.telegram import TelegramNotConfigured, send_bot_message
 from .services.telegram_auth import TelegramAuthenticationError, telegram_user_from_request
 from .services.multicard import (
     InvalidCallback, MulticardError, MulticardNotConfigured,
-    accept_success_callback, get_or_create_invoice, reconcile_invoice,
+    accept_success_callback, get_or_create_invoice, reconcile_invoice, _settle, to_tiyin,
 )
 
 logger = logging.getLogger(__name__)
@@ -244,7 +247,8 @@ def _is_demo_account(account):
 
 def _purchase_payload(purchase):
     members = list(purchase.members.all())
-    invoice = getattr(purchase, 'multicard_invoice', None)
+    invoices = sorted(purchase.multicard_invoices.all(), key=lambda item: item.pk, reverse=True)
+    invoice = next((item for item in invoices if item.state in ('creating', 'ready', 'uncertain', 'error')), invoices[0] if invoices else None)
     return {
         'id': purchase.id,
         'course': purchase.course.name,
@@ -252,8 +256,21 @@ def _purchase_payload(purchase):
         'purchase_type': purchase.purchase_type,
         'purchase_type_label': purchase.get_purchase_type_display(),
         'unit_price': str(purchase.unit_price),
+        'discount_per_person': str(purchase.discount_per_person),
+        'discount_name': purchase.discount_name,
+        'discount_total': str(purchase.discount_per_person * purchase.participant_count),
         'participant_count': purchase.participant_count,
         'total_amount': str(purchase.total_amount),
+        'is_booking': purchase.is_booking,
+        'booking_discount': str(purchase.booking_discount),
+        'discount_amount': str(purchase.discount_amount),
+        'paid_amount': str(purchase.paid_amount),
+        'remaining_amount': str(purchase.remaining_amount),
+        'payable_amount': str(purchase.payable_amount),
+        'minimum_payment': str(purchase.minimum_payment),
+        'invoice_amount': str(Decimal(invoice.amount) / 100) if invoice else '',
+        'payments': [{'amount': str(Decimal(item.amount) / 100), 'state': item.state,
+                      'receipt_url': item.receipt_url} for item in invoices],
         'payment_status': purchase.payment_status,
         'payment_status_label': purchase.get_payment_status_display(),
         'payment_provider': purchase.payment_provider,
@@ -261,7 +278,7 @@ def _purchase_payload(purchase):
         'receipt_url': invoice.receipt_url if invoice else '',
         'invoice_state': invoice.state if invoice else '',
         'contract_accepted': contract_accepted(purchase),
-        'contract_version': CONTRACT_VERSION,
+        'contract_version': contract_version(purchase),
         'questionnaire_completed': purchase.questionnaire_completed,
         'members': [
             {
@@ -279,7 +296,7 @@ def _purchase_payload(purchase):
 def _active_course_payloads():
     """Return one catalogue entry per course that has a sellable active group."""
     groups = (
-        Group.objects.filter(is_active=True)
+        Group.objects.upcoming()
         .select_related('course')
         .prefetch_related('teachers')
         .order_by('course__name', 'start_date', 'id')
@@ -287,13 +304,21 @@ def _active_course_payloads():
     courses = {}
     for group in groups:
         course = group.course
-        payload = courses.setdefault(course.id, {
-            'id': course.id,
-            'name': course.name,
-            'price': str(course.price),
-            'number_of_days': course.number_of_days,
-            'active_groups': [],
-        })
+        if course.id not in courses:
+            courses[course.id] = {
+                'id': course.id,
+                'name': course.name,
+                'price': str(course.price),
+                'booking_discount': str(booking_discount_for(course.price, 1, course.id)),
+                'minimum_booking': str(MiniAppPurchase.MIN_BOOKING_AMOUNT),
+                'number_of_days': course.number_of_days,
+                'participant_discounts': [
+                    {'name': rule.name, 'amount': str(rule.amount), 'min_participants': rule.min_participants}
+                    for rule in Discount.participant_rules(course.id)
+                ],
+                'active_groups': [],
+            }
+        payload = courses[course.id]
         payload['active_groups'].append({
             'id': group.id,
             'start_date': group.start_date.isoformat(),
@@ -346,7 +371,7 @@ def _my_course_payloads(account, purchases):
     client_ids = {account.client_id} if account.client_id else set()
     paid_purchases = [
         purchase for purchase in purchases
-        if purchase.payment_status == MiniAppPurchase.PAYMENT_SUCCESS
+        if purchase.payment_status in (MiniAppPurchase.PAYMENT_SUCCESS, MiniAppPurchase.PAYMENT_PARTIAL)
     ]
     for purchase in paid_purchases:
         client_ids.update(
@@ -423,7 +448,7 @@ def telegram_app_bootstrap(request):
     if error:
         return error
     purchases = list(
-        account.purchases.select_related('course', 'multicard_invoice')
+        account.purchases.select_related('course').prefetch_related('multicard_invoices')
         .prefetch_related('members__questionnaire', 'legal_acceptances')
     )
     return JsonResponse({
@@ -507,7 +532,7 @@ def telegram_app_accept_terms(request):
 
 def _account_purchase(account, purchase_id):
     return (
-        account.purchases.select_related('course', 'telegram_user', 'multicard_invoice')
+        account.purchases.select_related('course', 'telegram_user').prefetch_related('multicard_invoices')
         .prefetch_related('members', 'legal_acceptances')
         .filter(pk=purchase_id)
         .first()
@@ -527,7 +552,7 @@ def telegram_app_contract(request, purchase_id):
             'ok': True,
             'document': {
                 'type': LegalAcceptance.DOCUMENT_CONTRACT,
-                'version': CONTRACT_VERSION,
+                'version': contract_version(purchase),
                 'title': "Sog'lomlashtirish xizmatlari shartnomasi",
                 'html': render_contract_document(purchase),
                 'accepted': contract_accepted(purchase),
@@ -555,14 +580,14 @@ def telegram_app_accept_contract(request, purchase_id):
         if not purchase:
             return JsonResponse({'ok': False, 'error': "Xarid topilmadi."}, status=404)
         data = _json_body(request)
-        if data.get('accepted') is not True or data.get('version') != CONTRACT_VERSION:
+        if data.get('accepted') is not True or data.get('version') != contract_version(purchase):
             raise ValueError("Amaldagi shartnomani qabul qiling.")
         html = render_contract_document(purchase)
         with transaction.atomic():
             acceptance, _ = record_acceptance(
                 account,
                 LegalAcceptance.DOCUMENT_CONTRACT,
-                CONTRACT_VERSION,
+                contract_version(purchase),
                 html,
                 request,
                 purchase=purchase,
@@ -595,7 +620,7 @@ def telegram_app_create_purchase(request):
             }, status=409)
         data = _json_body(request)
         course = Course.objects.filter(
-            pk=data.get('course_id'), group__is_active=True,
+            pk=data.get('course_id'), group__in=Group.objects.upcoming(),
         ).distinct().get()
         purchase_type = data.get('purchase_type')
         if purchase_type not in dict(MiniAppPurchase.PURCHASE_TYPES):
@@ -628,14 +653,27 @@ def telegram_app_create_purchase(request):
             raise ValueError("Bir telefon raqamini ikki marta qo'shib bo'lmaydi.")
 
         with transaction.atomic():
-            total = Decimal(course.price) * len(participants)
+            participant_rule = Discount.participant_discount(course.id, len(participants))
+            discount_per_person = min(participant_rule.amount, course.price) if participant_rule else Decimal(0)
+            unit_price = course.price - discount_per_person
+            total = unit_price * len(participants)
+            mode = data.get('payment_mode', 'full')
+            if mode not in ('full', 'booking'):
+                raise ValueError("To'lov usulini tanlang.")
+            discount = booking_discount_for(unit_price, len(participants), course.id) if mode == 'booking' else Decimal(0)
+            if mode == 'booking' and total - discount < MiniAppPurchase.MIN_BOOKING_AMOUNT * len(participants):
+                raise ValueError("Bu kurs uchun bron summasi yetarli emas. To'liq to'lovni tanlang.")
             purchase = MiniAppPurchase.objects.create(
                 telegram_user=account,
                 course=course,
                 purchase_type=purchase_type,
-                unit_price=course.price,
+                unit_price=unit_price,
+                discount_per_person=discount_per_person,
+                discount_name=participant_rule.name if participant_rule else '',
                 participant_count=len(participants),
                 total_amount=total,
+                is_booking=mode == 'booking',
+                booking_discount=discount,
             )
             MiniAppPurchaseMember.objects.bulk_create([
                 MiniAppPurchaseMember(purchase=purchase, **participant)
@@ -669,29 +707,21 @@ def telegram_app_simulate_payment(request, purchase_id):
             'ok': False,
             'error': "To'lovdan oldin shartnomani o'qib, qabul qiling.",
         }, status=409)
-    if purchase.payment_status != MiniAppPurchase.PAYMENT_SUCCESS:
+    try:
         with transaction.atomic():
-            purchase.payment_provider = 'demo'
-            purchase.save(update_fields=('payment_provider',))
-            purchase.mark_paid(reference=f'DEMO-{purchase.uuid.hex[:12].upper()}')
-            for member in purchase.members.all():
-                member.client = _get_or_create_client(member.full_name, member.phone_number)
-                member.save(update_fields=('client',))
-                if member.relationship == MiniAppPurchaseMember.RELATION_SELF:
-                    account.client = member.client
-            account.save(update_fields=('client', 'updated_at'))
-        if not _is_demo_account(account):
-            try:
-                send_bot_message(
-                    account.telegram_id,
-                    f"✅ <b>To'lov muvaffaqiyatli</b>\n\n"
-                    f"Kurs: {escape(purchase.course.name)}\n"
-                    f"Summa: {purchase.total_amount:,.0f} UZS\n\n"
-                    "Kursni faollashtirish uchun majburiy anketani to'ldiring.",
-                )
-            except Exception:
-                pass
-    purchase = account.purchases.select_related('course', 'multicard_invoice').prefetch_related('members__questionnaire').get(pk=purchase.pk)
+            purchase = MiniAppPurchase.objects.select_for_update().get(pk=purchase.pk)
+            if purchase.payment_status == MiniAppPurchase.PAYMENT_REFUNDED:
+                raise ValueError("Bu to'lov qaytarilgan.")
+            if purchase.payment_status != MiniAppPurchase.PAYMENT_SUCCESS:
+                data = _json_body(request)
+                if purchase.is_booking:
+                    check_payment_version(purchase, data.get('expected_paid'))
+                amount = payment_amount(purchase, data.get('amount') if purchase.is_booking else None)
+                invoice = MulticardInvoice.objects.create(purchase=purchase, store_id='demo', amount=to_tiyin(amount))
+                _settle(invoice, uuid.uuid4(), provider='demo')
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+    purchase = account.purchases.select_related('course').prefetch_related('multicard_invoices').prefetch_related('members__questionnaire').get(pk=purchase.pk)
     return JsonResponse({'ok': True, 'purchase': _purchase_payload(purchase)})
 
 
@@ -703,8 +733,8 @@ def telegram_app_questionnaire(request, purchase_id):
     purchase = account.purchases.filter(pk=purchase_id).prefetch_related('members').first()
     if not purchase:
         return JsonResponse({'ok': False, 'error': "Xarid topilmadi."}, status=404)
-    if purchase.payment_status != MiniAppPurchase.PAYMENT_SUCCESS:
-        return JsonResponse({'ok': False, 'error': "Avval to'lovni yakunlang."}, status=409)
+    if purchase.payment_status not in (MiniAppPurchase.PAYMENT_SUCCESS, MiniAppPurchase.PAYMENT_PARTIAL):
+        return JsonResponse({'ok': False, 'error': "Avval bron yoki to'liq to'lovni amalga oshiring."}, status=409)
     try:
         data = _json_body(request)
         responses = {int(item.get('member_id')): item for item in (data.get('responses') or [])}
@@ -749,7 +779,7 @@ def telegram_app_questionnaire(request, purchase_id):
                 )
             except Exception:
                 pass
-        purchase = account.purchases.select_related('course', 'multicard_invoice').prefetch_related('members__questionnaire').get(pk=purchase.pk)
+        purchase = account.purchases.select_related('course').prefetch_related('multicard_invoices').prefetch_related('members__questionnaire').get(pk=purchase.pk)
         return JsonResponse({'ok': True, 'purchase': _purchase_payload(purchase)})
     except (TypeError, ValueError) as exc:
         return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
@@ -772,7 +802,12 @@ def telegram_app_payment(request, purchase_id):
     if purchase.payment_status == MiniAppPurchase.PAYMENT_REFUNDED:
         return JsonResponse({'ok': False, 'error': 'Bu to‘lov qaytarilgan. Yangi xarid yarating.'}, status=409)
     try:
-        invoice = get_or_create_invoice(purchase)
+        data = _json_body(request)
+        invoice = get_or_create_invoice(
+            purchase, data.get('amount') if purchase.is_booking else None, data.get('expected_paid'),
+        )
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
     except MulticardNotConfigured as exc:
         return JsonResponse({'ok': False, 'error': str(exc)}, status=503)
     except MulticardError as exc:
@@ -802,12 +837,12 @@ def telegram_app_check_payment(request, purchase_id):
     purchase = _account_purchase(account, purchase_id)
     if not purchase:
         return JsonResponse({'ok': False, 'error': 'Xarid topilmadi.'}, status=404)
-    invoice = MulticardInvoice.objects.filter(purchase=purchase).first()
-    if invoice:
-        try:
+    invoices = MulticardInvoice.objects.filter(purchase=purchase).exclude(store_id='demo').order_by('id')
+    try:
+        for invoice in invoices:
             reconcile_invoice(invoice)
-        except (MulticardError, InvalidCallback):
-            return JsonResponse({'ok': False, 'error': 'To‘lov holatini tekshirib bo‘lmadi. Keyinroq qayta tekshiring.'}, status=502)
+    except (MulticardError, InvalidCallback):
+        return JsonResponse({'ok': False, 'error': 'To‘lov holatini tekshirib bo‘lmadi. Keyinroq qayta tekshiring.'}, status=502)
     return JsonResponse({'ok': True, 'purchase': _purchase_payload(_account_purchase(account, purchase_id))})
 
 

@@ -1,0 +1,18 @@
+{
+  "source": "Kurs_narxlari.xlsx, Курс нархлари!A3:D15",
+  "courses": [
+    {"name": "Соғломлаштириш биринчи курс", "aliases": ["Sog'lomlashtirish 1-bosqich"], "price": 2000000, "booking_discount": 200000, "participant_discount": 100000},
+    {"name": "Соғломлаштириш биринчи курс онлайн", "aliases": ["Onlayn sog'lomlashtirish (1-bosqich)"], "price": 1800000, "booking_discount": 0, "participant_discount": 0},
+    {"name": "Хиссиётларни бошариш 2-курс", "aliases": ["Hissiyotlarni boshqarish"], "price": 2200000, "booking_discount": 200000, "participant_discount": 0},
+    {"name": "Хиссиётларни бошкариш 2-курс онлайн", "price": 1900000, "booking_discount": 0, "participant_discount": 0},
+    {"name": "Интуиция 3-курс", "aliases": ["Intuitsiyani rivojlantirish"], "price": 2500000, "booking_discount": 200000, "participant_discount": 0},
+    {"name": "Интуиция 3-курс онлайн", "price": 2000000, "booking_discount": 0, "participant_discount": 0},
+    {"name": "Болалар соғломлаштириш курси", "aliases": ["Bolalar sog'lomlashtirish kursi"], "price": 1400000, "booking_discount": 200000, "participant_discount": 100000},
+    {"name": "Ўсмирлар курси", "aliases": ["O'smirlar sog'lomlashtirish kursi"], "price": 1400000, "booking_discount": 200000, "participant_discount": 100000},
+    {"name": "Кўриш қобилиятини тиклаш курси", "aliases": ["Ko'rish qobiliyatini tiklash"], "price": 1500000, "booking_discount": 200000, "participant_discount": 0},
+    {"name": "Аёллар саломатлик ҳафтаси", "aliases": ["Ayollar salomatlik haftasi"], "price": 1700000, "booking_discount": 200000, "participant_discount": 0},
+    {"name": "Муаммо сабаблар ечимлар", "price": 800000, "booking_discount": 200000, "participant_discount": 0},
+    {"name": "Умуртқа поғонасини тиклаш", "price": 1500000, "booking_discount": 200000, "participant_discount": 0},
+    {"name": "Бахтли аёл сирлари", "aliases": ["Baxtli ayol sirlari"], "price": 1300000, "booking_discount": 200000, "participant_discount": 0}
+  ]
+}

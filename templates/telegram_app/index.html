@@ -140,7 +140,15 @@
           <button type="button" class="secondary-button" id="addFamilyMember">+ Oila a’zosini qo‘shish</button>
         </div>
         <div class="sticky-total">
-          <div><small>Jami</small><strong id="liveTotal">0 UZS</strong><span id="participantLabel">1 ishtirokchi</span></div>
+          <div class="booking-choice field">
+            <label for="paymentMode">To‘lov tartibi</label>
+            <select id="paymentMode">
+              <option value="booking">Bron qilish — bo‘lib to‘lash</option>
+              <option value="full">Birdaniga to‘liq to‘lash</option>
+            </select>
+            <p class="muted" id="bookingQuote" aria-live="polite"></p>
+          </div>
+          <div><small>Jami</small><strong id="liveTotal">0 UZS</strong><span id="participantLabel">1 ishtirokchi</span><span id="discountLabel" hidden></span></div>
           <button type="button" class="primary-button" id="continueToPayment">Davom etish →</button>
         </div>
       </section>
@@ -152,11 +160,18 @@
         <h2>To‘lovga tayyor</h2>
         <p class="muted">Ma’lumotlarni tekshiring va to‘lovni tasdiqlang.</p>
         <article class="summary-card" id="paymentSummary"></article>
+        <div class="field" id="installmentField" hidden>
+          <label for="installmentAmount">Hozir to‘laydigan summa (so‘m)</label>
+          <input id="installmentAmount" type="number" inputmode="decimal" step="0.01" aria-describedby="installmentHint" required>
+          <p class="muted" id="installmentHint"></p>
+          <button type="button" class="continue-button" id="payRemaining">Qolgan summani to‘liq kiritish</button>
+        </div>
         <button class="legal-link legal-link--confirmed" type="button" id="viewContract"><span>Shartnoma qabul qilindi</span><small id="contractVersionLabel">Elektron tasdiq saqlandi</small><strong>Ko‘rish</strong></button>
         <div class="demo-note"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span><p id="paymentNote">To‘lov Multicard orqali amalga oshiriladi.</p></div>
         <p class="muted" id="paymentStatus" role="status" aria-live="polite"></p>
         <button type="button" class="continue-button" id="checkPayment" hidden>To‘lov holatini tekshirish</button>
         <button type="button" class="primary-button primary-button--wide" id="payButton">To‘lovni amalga oshirish</button>
+        <button type="button" class="secondary-button" id="bookingQuestionnaire" hidden>Anketani to‘ldirish</button>
       </section>
 
       <section class="view" id="questionnaireView">
@@ -173,7 +188,7 @@
         <div class="success-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 4 4 8-9"/></svg></div>
         <p class="eyebrow eyebrow--dark">Hammasi tayyor</p>
         <h2>Ro‘yxatdan o‘tish yakunlandi</h2>
-        <p>To‘lov va anketa qabul qilindi. Keyingi ma’lumotlarni Telegram orqali yuboramiz.</p>
+        <p id="successDescription">To‘lov va anketa qabul qilindi. Keyingi ma’lumotlarni Telegram orqali yuboramiz.</p>
         <button class="primary-button primary-button--wide" type="button" data-go-home>Bosh sahifaga qaytish</button>
       </section>
     </main>

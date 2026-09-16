@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import json
 import time
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import urlencode
@@ -10,12 +10,14 @@ from urllib.parse import urlencode
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import (
     AttendanceLesson,
     AttendanceRecord,
     Client,
     Course,
+    Discount,
     EnrollmentQuestionnaire,
     Group,
     LegalAcceptance,
@@ -104,7 +106,7 @@ class TelegramMiniAppTests(TestCase):
             name='Sog‘lomlashtirish kursi', price=Decimal('1500000'), number_of_days=10,
         )
         self.group = Group.objects.create(
-            course=self.course, start_date=date(2026, 9, 10), number_of_days=10,
+            course=self.course, start_date=timezone.localdate() + timedelta(days=10), number_of_days=10,
             is_active=True,
         )
         self.headers = {'HTTP_X_TELEGRAM_DEMO': '1'}
@@ -238,7 +240,7 @@ class TelegramMiniAppTests(TestCase):
         )
         self.assertEqual(
             response.json()['courses'][0]['active_groups'][0]['start_date'],
-            '2026-09-10',
+            self.group.start_date.isoformat(),
         )
 
         self.post_json(reverse('main:telegram_app_accept_terms'), {
@@ -270,7 +272,7 @@ class TelegramMiniAppTests(TestCase):
         AttendanceRecord.objects.create(client=outsider, group=self.group)
         AttendanceLesson.objects.create(
             attendance=record,
-            date=date(2026, 9, 10),
+            date=self.group.start_date,
             status=AttendanceLesson.STATUS_ATTENDED,
             note='QR orqali tasdiqlandi',
             marked_by=marker,

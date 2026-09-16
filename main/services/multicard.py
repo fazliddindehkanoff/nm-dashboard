@@ -16,6 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from main.models import Client, MiniAppPurchase, MiniAppPurchaseMember, MulticardInvoice
+from .booking import check_payment_version, payment_amount
 
 
 class MulticardError(Exception):
@@ -108,6 +109,10 @@ class MulticardClient:
             'total': invoice.amount, 'name': purchase.course.name,
             'mxik': self.config['OFD_MXIK'], 'package_code': self.config['OFD_PACKAGE_CODE'],
         }
+        if purchase.is_booking:
+            # An installment is one payment towards the course, not N full fees.
+            item.update(qty=1, price=invoice.amount,
+                        name=f'{purchase.course.name} — qisman to‘lov')
         if self.config.get('OFD_VAT', '') != '':
             item['vat'] = int(self.config['OFD_VAT'])
         return self._request('POST', '/payment/invoice', {
@@ -121,18 +126,27 @@ class MulticardClient:
         return self._request('GET', f'/payment/invoice/{UUID(str(provider_uuid))}')
 
 
-def get_or_create_invoice(purchase):
+def get_or_create_invoice(purchase, requested_amount=None, expected_paid=None):
     config = configuration()
-    amount = to_tiyin(purchase.total_amount)
-    if amount != to_tiyin(purchase.unit_price) * purchase.participant_count:
-        raise MulticardError('Xarid summasi ishtirokchilar soniga mos emas.')
-    invoice, created = MulticardInvoice.objects.get_or_create(
-        purchase=purchase, defaults={'store_id': str(int(config['STORE_ID'])), 'amount': amount},
-    )
-    if not created:
-        if invoice.checkout_url and invoice.state in ('ready', 'error'):
-            return invoice
-        raise MulticardError("To'lov holati tekshirilmoqda. Qayta to'lamang; administrator bilan bog'laning.")
+    with transaction.atomic():
+        purchase = MiniAppPurchase.objects.select_for_update().get(pk=purchase.pk)
+        if purchase.payment_status in (MiniAppPurchase.PAYMENT_SUCCESS, MiniAppPurchase.PAYMENT_REFUNDED):
+            raise ValueError("Bu xarid uchun yangi to'lov ochib bo'lmaydi.")
+        if purchase.is_booking:
+            check_payment_version(purchase, expected_paid)
+        if purchase.total_amount != purchase.unit_price * purchase.participant_count:
+            raise MulticardError('Xarid summasi ishtirokchilar soniga mos emas.')
+        amount = to_tiyin(payment_amount(purchase, requested_amount))
+        invoice, created = MulticardInvoice.objects.get_or_create(
+            purchase=purchase, state__in=('creating', 'ready', 'uncertain', 'error'),
+            defaults={'store_id': str(int(config['STORE_ID'])), 'amount': amount},
+        )
+        if not created:
+            if invoice.amount != amount:
+                raise ValueError("Avval ochilgan to'lovni yakunlang. Uning summasini o'zgartirib bo'lmaydi.")
+            if invoice.checkout_url and invoice.state in ('ready', 'error'):
+                return invoice
+            raise MulticardError("To'lov holati tekshirilmoqda. Qayta to'lamang; administrator bilan bog'laning.")
     try:
         data = MulticardClient(config).create_invoice(invoice, purchase)
         provider_uuid = UUID(data.get('uuid', ''))
@@ -171,25 +185,33 @@ def _link_members(purchase):
             account.save(update_fields=('client', 'updated_at'))
 
 
-def _settle(invoice, payment_uuid, receipt_url=''):
+def _settle(invoice, payment_uuid, receipt_url='', provider='multicard'):
     """Caller holds an atomic transaction and invoice lock."""
     purchase = MiniAppPurchase.objects.select_for_update().get(pk=invoice.purchase_id)
     if invoice.payment_uuid and invoice.payment_uuid != payment_uuid:
         raise InvalidCallback('Payment reference mismatch')
     if invoice.state == 'revert' or purchase.payment_status == MiniAppPurchase.PAYMENT_REFUNDED:
         raise InvalidCallback('Payment already refunded')
-    if purchase.payment_status == MiniAppPurchase.PAYMENT_SUCCESS:
-        if purchase.payment_reference != str(payment_uuid):
-            raise InvalidCallback('Purchase already paid')
+    if invoice.state == 'success':
         return
-    # Conditional write also makes simultaneous callbacks safe on SQLite, where
-    # select_for_update is a no-op (a competing transaction fails and retries).
-    updated = MiniAppPurchase.objects.filter(pk=purchase.pk).exclude(
-        payment_status=MiniAppPurchase.PAYMENT_SUCCESS,
-    ).update(payment_status=MiniAppPurchase.PAYMENT_SUCCESS, payment_provider='multicard',
+    if purchase.payment_status == MiniAppPurchase.PAYMENT_SUCCESS:
+        raise InvalidCallback('Purchase already paid')
+    amount = Decimal(invoice.amount) / 100
+    if amount > purchase.payable_amount:
+        raise InvalidCallback('Payment exceeds outstanding balance')
+    discount = purchase.booking_discount if purchase.is_booking else Decimal(0)
+    paid = purchase.paid_amount + amount
+    status = (MiniAppPurchase.PAYMENT_SUCCESS if paid >= purchase.total_amount - discount
+              else MiniAppPurchase.PAYMENT_PARTIAL)
+    # Compare the balance as well as holding the lock. On SQLite a competing
+    # transaction fails and the provider can retry its signed callback safely.
+    updated = MiniAppPurchase.objects.filter(pk=purchase.pk, paid_amount=purchase.paid_amount).update(
+             payment_status=status, payment_provider=provider,
+             paid_amount=paid, discount_amount=discount,
              payment_reference=str(payment_uuid), paid_at=timezone.now(), updated_at=timezone.now())
-    if updated:
-        _link_members(purchase)
+    if not updated:
+        raise InvalidCallback('Purchase balance changed; retry callback')
+    _link_members(purchase)
     invoice.payment_uuid = payment_uuid
     invoice.state = 'success'
     if https_url(receipt_url):
@@ -257,16 +279,25 @@ def reconcile_invoice(invoice):
             # may include an additional payer commission.
             _settle(invoice, payment_uuid, payment.get('receipt_url'))
         elif status == 'revert' and invoice.payment_uuid == payment_uuid:
+            purchase = MiniAppPurchase.objects.select_for_update().get(pk=invoice.purchase_id)
             invoice.state = 'revert'
             invoice.save(update_fields=('state', 'updated_at'))
-            MiniAppPurchase.objects.filter(pk=invoice.purchase_id).update(
-                payment_status=MiniAppPurchase.PAYMENT_REFUNDED, updated_at=timezone.now(),
+            # Recalculate from settled installments: repeated refunds are idempotent.
+            paid = sum((Decimal(value) / 100 for value in
+                        purchase.multicard_invoices.filter(state='success').values_list('amount', flat=True)), Decimal(0))
+            discount = purchase.booking_discount if purchase.is_booking and paid > 0 else Decimal(0)
+            purchase_status = (MiniAppPurchase.PAYMENT_REFUNDED if paid == 0 else
+                               MiniAppPurchase.PAYMENT_SUCCESS if paid >= purchase.total_amount - discount else
+                               MiniAppPurchase.PAYMENT_PARTIAL)
+            MiniAppPurchase.objects.filter(pk=purchase.pk).update(
+                paid_amount=paid, discount_amount=discount,
+                payment_status=purchase_status, updated_at=timezone.now(),
             )
         elif status == 'error' and invoice.state not in ('success', 'revert'):
             invoice.state = 'error'
             invoice.save(update_fields=('state', 'updated_at'))
             MiniAppPurchase.objects.filter(pk=invoice.purchase_id).exclude(
-                payment_status__in=(MiniAppPurchase.PAYMENT_SUCCESS, MiniAppPurchase.PAYMENT_REFUNDED),
+                payment_status__in=(MiniAppPurchase.PAYMENT_SUCCESS, MiniAppPurchase.PAYMENT_REFUNDED, MiniAppPurchase.PAYMENT_PARTIAL),
             ).update(payment_status=MiniAppPurchase.PAYMENT_FAILED, updated_at=timezone.now())
 
 

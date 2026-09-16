@@ -6,6 +6,43 @@ A signed success callback commits the payment and links each participant to a CR
 client. The questionnaire remains locked until payment is confirmed. Purchases
 and references are visible under **Mini App xaridlari** in the admin.
 
+## Booking and installments
+
+New checkouts offer booking or the existing full-payment flow. Booking requires
+100,000 UZS per participant (including the buyer): two people must pay at least
+200,000 UZS. The buyer can enter a larger amount up to the discounted balance.
+Later installments use the same minimum, except that the entire final balance
+can be paid when it is smaller. The CRM transaction/payment workflow is unchanged.
+
+The active **Bron chegirmasi** amount is snapshotted per participant when creating
+the purchase, following the same course-specific-first selection as the CRM. Existing automatic
+participant discounts remain in the saved course price; the booking discount is
+additional and is capped at that price. It is
+applied exactly once after the first confirmed payment, not when checkout opens.
+For a 1,500,000 UZS course and 200,000 UZS booking discount, a 100,000 UZS payment
+leaves 1,200,000 UZS due. Later edits to prices or discounts do not change that
+purchase. Inactive/non-booking discounts are ignored. A booking whose discounted
+price is below the minimum is rejected; full payment remains available.
+
+Each installment has its own immutable Multicard invoice; only one invoice can
+be open per purchase. Repeated callbacks cannot add the payment twice. The API
+requires the client's last `expected_paid` balance for booking payments, so a
+stale retry after payment cannot create another installment. Uncertain invoices
+must be reconciled before proceeding. An installment receipt contains the amount
+actually being paid rather than the full course fee.
+
+Confirmed booking payments unlock the questionnaire. The purchase remains
+`partial` until the discounted balance reaches zero, and the home screen keeps
+the remaining balance accessible for later payments. Partial refunds preserve
+the other settled installments; refunding all payments removes the discount and
+marks the purchase refunded. Existing paid purchases retain their paid balance
+through migration `0028`; no historical booking discounts are added.
+
+Booking contracts have their own version; existing full-payment acceptances stay
+valid. Apply migration `0028`, restart the app, and collect static assets together
+when deploying. Local verification uses mocked provider responses and demo
+payments; no real cards are charged by tests.
+
 ## Configuration
 
 Set these environment variables on the Django server (or in the ignored `.env`).
@@ -78,6 +115,12 @@ then attach its provider UUID with:
 
 ```sh
 python manage.py reconcile_multicard --purchase-id 123 --provider-uuid PROVIDER_UUID
+```
+
+If the purchase has multiple installments, select the exact local invoice row:
+
+```sh
+python manage.py reconcile_multicard --invoice-id 456 --provider-uuid PROVIDER_UUID
 ```
 
 Recovery verifies the provider's invoice ID, store and amount before saving the

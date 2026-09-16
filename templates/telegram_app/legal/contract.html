@@ -7,6 +7,11 @@
     <p><span>Kurs</span><strong>{{ purchase.course.name }}</strong></p>
     <p><span>Ishtirokchilar</span><strong>{{ purchase.participant_count }} kishi</strong></p>
     <p><span>Jami xizmat haqi</span><strong>{{ purchase.total_amount|floatformat:0 }} UZS</strong></p>
+    {% if purchase.is_booking %}
+    <p><span>Bron to‘lovi tasdiqlangach qo‘llanadigan chegirma</span><strong>{{ purchase.booking_discount|floatformat:0 }} UZS</strong></p>
+    <p><span>Har bir ishtirokchi uchun eng kam bron to‘lovi</span><strong>100 000 UZS</strong></p>
+    <p>Bron to‘lovi kurs narxining bir qismi hisoblanadi. To‘lov tasdiqlangach bron chegirmasi har bir ishtirokchiga bir marta qo‘llanadi. Qolgan qarz — jami xizmat haqi, chegirma va tasdiqlangan to‘lovlar farqi. Qolgan summani keyingi to‘lovlar bilan to‘lash mumkin.</p>
+    {% endif %}
   </div>
 
   <p class="legal-document__lead">«Norbekov sog‘lomlashtirish va maslahat markazi» MChJ nomidan Ustav asosida faoliyat yurituvchi direktor SHARIPOV MUSULMONKUL XAMZAYEVICH (keyingi o‘rinlarda «Ijrochi») bir tomondan va yuqorida ko‘rsatilgan Buyurtmachi ikkinchi tomondan, birgalikda «Taraflar» deb yuritiluvchilar quyidagi shartlarda ushbu Shartnomani tuzdilar.</p>
@@ -27,7 +32,11 @@
   <h3>III. Xizmatlar narxi va ularni to‘lash tartibi</h3>
   <p><strong>3.1.</strong> Ijrochi tomonidan Buyurtmachiga ko‘rsatiladigan xizmatlar haqi ushbu xarid ma’lumotlarida ko‘rsatilgan jami summani tashkil etadi.</p>
   <p><strong>3.2.</strong> To‘lov Telegram Mini App’da taqdim etilgan to‘lov usuli orqali amalga oshiriladi.</p>
+  {% if purchase.is_booking %}
+  <p><strong>3.3.</strong> Kursdagi joyni bron qilish uchun Buyurtmachi har bir ishtirokchiga kamida 100 000 UZS to‘laydi. Bron to‘lovi xizmat haqining bir qismi bo‘lib, tasdiqlangach yuqorida ko‘rsatilgan chegirma qo‘llanadi; qolgan summa keyingi to‘lovlarda to‘lanadi.</p>
+  {% else %}
   <p><strong>3.3.</strong> Buyurtmachi xizmat haqini kursdagi joy tasdiqlanishidan oldin amalga oshirishi lozim.</p>
+  {% endif %}
 
   <h3>IV. Xizmatlarning turi va davomiyligi</h3>
   <p><strong>4.1.</strong> “Norbekov tizimi” asosida ko‘rsatiladigan xizmat turi — <strong>{{ purchase.course.name }}</strong>.</p>

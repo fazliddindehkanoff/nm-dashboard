@@ -47,7 +47,7 @@ from .services.amocrm import (
 )
 from .services.telegram import send_payment_qr, TelegramNotConfigured
 from .services.telegram_campaigns import queue_campaign
-from .services.legal import CONTRACT_VERSION, TERMS_VERSION
+from .services.legal import contract_version, TERMS_VERSION
 
 
 def _is_plain_operator(request):
@@ -906,12 +906,15 @@ class AttendanceRecordAdmin(ModelAdmin):
 
 @admin.register(Discount)
 class DiscountAdmin(ModelAdmin):
-    list_display = ('name', 'amount', 'kind_badge', 'active_badge')
-    list_filter = ('is_active', 'is_booking')
+    list_display = ('name', 'course', 'amount', 'min_participants', 'kind_badge', 'active_badge')
+    list_filter = ('is_active', 'is_booking', 'course')
+    autocomplete_fields = ('course',)
     search_fields = ('name',)
 
     @display(description=_("Turi"), label={_("Bron (avto)"): "default", _("Qo'shimcha"): "default"})
     def kind_badge(self, obj):
+        if obj.min_participants:
+            return _("Ishtirokchilar (avto)")
         return _("Bron (avto)") if obj.is_booking else _("Qo'shimcha")
 
     @display(description=_("Holati"), label={_("Faol"): "default", _("Nofaol"): "default"})
@@ -2356,7 +2359,7 @@ class MulticardInvoiceInline(TabularInline):
 class MiniAppPurchaseAdmin(ModelAdmin):
     list_display = (
         'telegram_user', 'course', 'purchase_type', 'participant_count',
-        'total_amount', 'contract_status', 'payment_status',
+        'total_amount', 'discount_amount', 'paid_amount', 'balance', 'contract_status', 'payment_status',
         'questionnaire_completed', 'created_at',
     )
     list_filter = ('payment_status', 'purchase_type', 'questionnaire_completed', 'course')
@@ -2364,15 +2367,28 @@ class MiniAppPurchaseAdmin(ModelAdmin):
         'telegram_user__full_name', 'telegram_user__phone_number',
         'members__full_name', 'members__phone_number', 'payment_reference',
     )
-    readonly_fields = ('uuid', 'created_at', 'updated_at', 'paid_at')
+    readonly_fields = ('uuid', 'discount_name', 'discount_per_person', 'created_at', 'updated_at', 'paid_at', 'booking_discount',
+                       'discount_amount', 'paid_amount', 'balance')
     autocomplete_fields = ('telegram_user', 'course')
     inlines = (MiniAppPurchaseMemberInline, MulticardInvoiceInline,)
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = super().get_readonly_fields(request, obj)
+        if obj:
+            return (*fields, 'telegram_user', 'course', 'purchase_type', 'participant_count',
+                    'unit_price', 'total_amount', 'is_booking', 'payment_status',
+                    'payment_provider', 'payment_reference')
+        return fields
+
+    @display(description=_("Qolgan qarz"))
+    def balance(self, obj):
+        return obj.remaining_amount
 
     @display(description=_("Shartnoma"), boolean=True)
     def contract_status(self, obj):
         return obj.legal_acceptances.filter(
             document_type=LegalAcceptance.DOCUMENT_CONTRACT,
-            version=CONTRACT_VERSION,
+            version=contract_version(obj),
         ).exists()
 
 
