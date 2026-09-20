@@ -113,12 +113,12 @@ def send_bot_message(chat_id, text, reply_markup=None):
     return False, result.get("description") or f"HTTP {response.status_code}"
 
 
-def send_bot_photo(chat_id, photo_file):
+def send_bot_photo(chat_id, photo_file, caption=None):
     """Send a photo file. Network and response errors are returned, never raised."""
     try:
         response = telegram_api_request(
             "sendPhoto",
-            data={'chat_id': chat_id},
+            data={'chat_id': chat_id, **({'caption': caption} if caption else {})},
             files={'photo': photo_file},
             timeout=(2, 10),
         )

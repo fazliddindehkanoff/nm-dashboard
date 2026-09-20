@@ -14,8 +14,9 @@ def booking_discount_for(unit_price, participant_count, course_id):
     return min(per_person, Decimal(unit_price)) * participant_count
 
 
-def payment_amount(purchase, value=None):
+def payment_amount(purchase, value=None, *, minimum=None):
     maximum = purchase.payable_amount
+    minimum = purchase.minimum_payment if minimum is None else minimum
     try:
         if purchase.is_booking and value is None:
             raise ValueError
@@ -26,8 +27,8 @@ def payment_amount(purchase, value=None):
         raise ValueError("To'lov summasini so'mda, ko'pi bilan 2 kasr xonasi bilan kiriting.") from None
     if amount > maximum:
         raise ValueError("To'lov summasi qolgan qarzdan oshmasligi kerak.")
-    if amount < purchase.minimum_payment:
-        raise ValueError(f"Eng kam to'lov: {purchase.minimum_payment:,.0f} so'm.")
+    if amount < minimum:
+        raise ValueError(f"Eng kam to'lov: {minimum:,.0f} so'm.")
     return amount
 
 

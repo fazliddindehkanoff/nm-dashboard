@@ -133,7 +133,7 @@
           <button type="button" class="segment__item is-active" data-purchase-type="self">O‘zim uchun</button>
           <button type="button" class="segment__item" data-purchase-type="family">Oila bilan</button>
         </div>
-        <div class="self-row" id="selfParticipant"></div>
+        <div class="self-row" id="selfParticipant"></div><div id="selfEligibility"></div><p id="socialDiscountLabel" class="muted" aria-live="polite"></p>
         <div class="family-area" id="familyArea" hidden>
           <div class="family-heading"><h3>Oila a’zolari</h3><span>7 tagacha</span></div>
           <div id="familyMembers"></div>
@@ -172,6 +172,17 @@
         <button type="button" class="continue-button" id="checkPayment" hidden>To‘lov holatini tekshirish</button>
         <button type="button" class="primary-button primary-button--wide" id="payButton">To‘lovni amalga oshirish</button>
         <button type="button" class="secondary-button" id="bookingQuestionnaire" hidden>Anketani to‘ldirish</button>
+      </section>
+
+      <section class="view success-view" id="paymentResultView" aria-live="polite">
+        <div class="success-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 4 4 8-9"/></svg></div>
+        <h2>To‘lov muvaffaqiyatli!</h2><p id="paymentResultNote"></p>
+        <div class="summary-row"><span>Ushbu to‘lov</span><strong id="paymentResultAmount"></strong></div>
+        <div class="summary-row"><span>Jami to‘langan</span><strong id="paymentResultPaid"></strong></div>
+        <div class="summary-row"><span>Qolgan qarz</span><strong id="paymentResultDebt"></strong></div>
+        <p class="muted">Har bir ishtirokchining QR-kodi Telegram bot orqali yuboriladi.</p>
+        <button class="primary-button primary-button--wide" id="continueAfterPayment" type="button">Davom etish</button>
+        <button class="primary-button primary-button--wide" data-go-home type="button">Bosh sahifaga qaytish</button>
       </section>
 
       <section class="view" id="questionnaireView">

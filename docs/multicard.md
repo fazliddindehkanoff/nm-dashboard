@@ -8,9 +8,14 @@ and references are visible under **Mini App xaridlari** in the admin.
 
 ## Booking and installments
 
-New checkouts offer booking or the existing full-payment flow. Booking requires
-100,000 UZS per participant (including the buyer): two people must pay at least
-200,000 UZS. The buyer can enter a larger amount up to the discounted balance.
+New checkouts offer booking or the existing full-payment flow. The minimum per
+participant (including the buyer) is editable under **To'lov sozlamalari** in the
+CRM. It defaults to 100,000 UZS; set it to 1,000 UZS for testing and restore it to
+100,000 UZS afterwards. Two people require twice the configured minimum.
+Changes apply to subsequent payment requests immediately, including existing
+purchases, while already-created invoices retain their amount. The displayed
+contract uses the configured minimum and requires acceptance for that amount.
+The buyer can enter a larger amount up to the discounted balance.
 Later installments use the same minimum, except that the entire final balance
 can be paid when it is smaller. The CRM transaction/payment workflow is unchanged.
 

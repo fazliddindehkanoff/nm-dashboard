@@ -6,7 +6,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib import admin
 from .models import (
     Client, Expense, Group, Operator, RoleConfiguration, TelegramCampaign,
-    TelegramUser, Transaction, TransactionClient,
+    TelegramUser, Transaction, TransactionClient, MulticardInvoice,
 )
 from .permissions import is_operator, is_owner, permission_required
 from django.db.models import Sum, Count
@@ -294,11 +294,18 @@ def salaries(request):
     elif operator_filter:
         base_qs = base_qs.filter(operator_id=operator_filter)
 
+    referral_base = MulticardInvoice.objects.filter(state='success').exclude(store_id='demo')
+    if is_plain_op:
+        referral_base = referral_base.filter(purchase__referrer=request.user.operator)
+    elif operator_filter:
+        referral_base = referral_base.filter(purchase__referrer_id=operator_filter)
+
     # Badge'larda ko'rsatiladigan yillar ro'yxati (mavjud ma'lumotlar + tanlangan yil).
     available_years = sorted(
         base_qs.annotate(year=ExtractYear('date')).values_list('year', flat=True).distinct(),
         reverse=True,
     )
+    available_years = sorted(set(available_years) | set(referral_base.filter(paid_at__isnull=False).annotate(year=ExtractYear('paid_at')).values_list('year', flat=True)), reverse=True)
     if selected_year not in available_years:
         available_years = sorted(set(available_years) | {selected_year}, reverse=True)
 
@@ -308,6 +315,9 @@ def salaries(request):
         for item in base_qs.filter(date__year=selected_year)
         .annotate(month=ExtractMonth('date')).values('month').annotate(count=Count('id'))
     }
+
+    for item in referral_base.filter(paid_at__year=selected_year).annotate(month=ExtractMonth('paid_at')).values('month').annotate(count=Count('purchase_id', distinct=True)):
+        monthly_counts[item['month']] = monthly_counts.get(item['month'], 0) + item['count']
 
     months = [
         (1, "Yanvar", monthly_counts.get(1, 0)),
@@ -338,6 +348,13 @@ def salaries(request):
         )
         sales_count = transactions.count()
         total_collected = transactions.aggregate(total=Sum('amount'))['total'] or 0
+        referral_invoices = MulticardInvoice.objects.filter(
+            purchase__referrer=operator, state='success', paid_at__year=selected_year,
+            paid_at__month=selected_month,
+        ).exclude(store_id='demo')
+        from decimal import Decimal
+        total_collected += Decimal(referral_invoices.aggregate(total=Sum('amount'))['total'] or 0) / 100
+        sales_count += referral_invoices.values('purchase_id').distinct().count()
         percentage = calculate_salary_percentage(float(total_collected))
         salary = float(total_collected) * (percentage / 100)
 
@@ -453,6 +470,7 @@ def qr_verify(request):
         'invalid_code': invalid_code,
         'client': client,
         'transactions': transactions,
+        'online_enrollments': client.mini_app_enrollments.select_related('purchase__course').filter(purchase__payment_status__in=('partial', 'success')) if client else [],
         'summary': summary,
         'is_plain_operator': is_plain_op,
     }

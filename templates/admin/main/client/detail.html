@@ -8,6 +8,8 @@
 {% endblock %}
 
 {% block content %}
+{% if eligibility_documents %}<section class="p-6 border rounded mb-6"><h2 class="font-semibold">Ijtimoiy chegirma hujjatlari</h2>
+{% for document in eligibility_documents %}<p><a class="text-primary-600 underline" href="{% url 'main:eligibility_document' document.id %}">{{ document.get_category_display }} — {{ document.original_name }}</a> · {{ document.created_at }}</p>{% endfor %}</section>{% endif %}
 <div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-8">
 
     <!-- Header: sarlavha + o'ng qo'l tepada actionlar -->

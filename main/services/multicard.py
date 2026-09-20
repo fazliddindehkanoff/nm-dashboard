@@ -109,7 +109,7 @@ class MulticardClient:
             'total': invoice.amount, 'name': purchase.course.name,
             'mxik': self.config['OFD_MXIK'], 'package_code': self.config['OFD_PACKAGE_CODE'],
         }
-        if purchase.is_booking:
+        if purchase.is_booking or purchase.social_discount_amount:
             # An installment is one payment towards the course, not N full fees.
             item.update(qty=1, price=invoice.amount,
                         name=f'{purchase.course.name} — qisman to‘lov')
@@ -134,9 +134,16 @@ def get_or_create_invoice(purchase, requested_amount=None, expected_paid=None):
             raise ValueError("Bu xarid uchun yangi to'lov ochib bo'lmaydi.")
         if purchase.is_booking:
             check_payment_version(purchase, expected_paid)
-        if purchase.total_amount != purchase.unit_price * purchase.participant_count:
+        if purchase.total_amount != purchase.unit_price * purchase.participant_count - purchase.social_discount_amount:
             raise MulticardError('Xarid summasi ishtirokchilar soniga mos emas.')
-        amount = to_tiyin(payment_amount(purchase, requested_amount))
+        # An existing immutable invoice keeps its agreed amount even if the CRM
+        # minimum has since changed. Its amount must still match exactly below.
+        has_open_invoice = purchase.multicard_invoices.filter(
+            state__in=('creating', 'ready', 'uncertain', 'error'),
+        ).exists()
+        amount = to_tiyin(payment_amount(
+            purchase, requested_amount, minimum=0 if has_open_invoice else None,
+        ))
         invoice, created = MulticardInvoice.objects.get_or_create(
             purchase=purchase, state__in=('creating', 'ready', 'uncertain', 'error'),
             defaults={'store_id': str(int(config['STORE_ID'])), 'amount': amount},
@@ -178,6 +185,8 @@ def _link_members(purchase):
                        if ''.join(filter(str.isdigit, item.phone_number)) == target), None)
         if not client:
             client = Client.objects.create(full_name=member.full_name, phone_number=member.phone_number)
+        if purchase.referrer_id:
+            Client.objects.filter(pk=client.pk, operator__isnull=True).update(operator_id=purchase.referrer_id)
         member.client = client
         member.save(update_fields=('client',))
         if member.relationship == MiniAppPurchaseMember.RELATION_SELF:
@@ -216,7 +225,12 @@ def _settle(invoice, payment_uuid, receipt_url='', provider='multicard'):
     invoice.state = 'success'
     if https_url(receipt_url):
         invoice.receipt_url = receipt_url
-    invoice.save(update_fields=('payment_uuid', 'state', 'receipt_url', 'updated_at'))
+    invoice.paid_at = timezone.now()
+    invoice.save(update_fields=('payment_uuid', 'state', 'receipt_url', 'paid_at', 'updated_at'))
+    if provider != 'demo':
+        from main.models import PaymentQRDelivery
+        for member in purchase.members.all():
+            PaymentQRDelivery.objects.get_or_create(invoice=invoice, member=member)
 
 
 def accept_success_callback(data):

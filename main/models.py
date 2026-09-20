@@ -78,6 +78,7 @@ class GroupQuerySet(models.QuerySet):
 
 
 class Group(models.Model):
+    banner = models.ImageField("Banner", upload_to="group_banners/%Y/%m/", blank=True)
     objects = GroupQuerySet.as_manager()
     course = models.ForeignKey(Course, on_delete=models.CASCADE, verbose_name=_("Kurs"))
     teachers = models.ManyToManyField(Teacher, verbose_name=_("O'qituvchilar"), blank=True)
@@ -147,6 +148,7 @@ class Client(models.Model):
         return self.full_name
 
 class Operator(models.Model):
+    referral_code = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     ROLE_CHOICES = RoleConfiguration.ROLE_CHOICES
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, verbose_name=_("Foydalanuvchi"), null=True, blank=True)
@@ -273,7 +275,11 @@ class Discount(models.Model):
             min_participants__lte=participant_count,
         ).first()
 
+PAYMENT_METHODS = (("naqd", "Naqd"), ("terminal", "Terminal"), ("rahmat", "Rahmat"))
+
+
 class Transaction(models.Model):
+    payment_method = models.CharField("To‘lov usuli", max_length=20, choices=PAYMENT_METHODS, default="naqd")
     PAYMENT_TYPES = (
         ('bron', _("Bron")),
         ('doplata', _("Doplata")),
@@ -669,8 +675,7 @@ class SubTransaction(models.Model):
     """
 
     METHOD_CASH = 'naqd'
-    METHODS = (
-        (METHOD_CASH, _("Naqd pul")),
+    METHODS = PAYMENT_METHODS + (
         ('karta', _("Plastik karta")),
         ('bank', _("Bank o'tkazmasi")),
         ('online', _("Online (Payme / Click)")),
@@ -789,6 +794,7 @@ class SubTransaction(models.Model):
 
 
 class TelegramUser(models.Model):
+    referrer = models.ForeignKey(Operator, null=True, blank=True, on_delete=models.SET_NULL, related_name="referral_accounts", editable=False)
     STEP_NAME = 'name'
     STEP_CONTACT = 'contact'
     STEP_READY = 'ready'
@@ -963,8 +969,35 @@ class TelegramCampaignRecipient(models.Model):
         return f"{self.campaign} — {self.telegram_user}"
 
 
+class PaymentSettings(models.Model):
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    minimum_booking_amount = models.PositiveIntegerField(
+        _("Bir kishi uchun eng kam bron to'lovi (so'm)"),
+        default=100000, validators=(MinValueValidator(1),),
+        help_text=_("Test uchun 1000, odatiy bron uchun 100000 kiriting. Yangi to'lovlarga darhol amal qiladi; ochilgan to'lov hisoblari o'zgarmaydi."),
+    )
+    updated_at = models.DateTimeField(_("Yangilangan vaqt"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("To'lov sozlamalari")
+        verbose_name_plural = _("To'lov sozlamalari")
+        constraints = [
+            models.CheckConstraint(check=models.Q(id=1), name='payment_settings_singleton'),
+            models.CheckConstraint(check=models.Q(minimum_booking_amount__gte=1), name='positive_booking_minimum'),
+        ]
+
+    def __str__(self):
+        return str(self._meta.verbose_name)
+
+    @classmethod
+    def booking_minimum(cls):
+        amount = cls.objects.filter(pk=1).values_list('minimum_booking_amount', flat=True).first()
+        return Decimal(amount if amount is not None else 100000)
+
+
 class MiniAppPurchase(models.Model):
-    MIN_BOOKING_AMOUNT = Decimal('100000')
+    referrer = models.ForeignKey(Operator, null=True, blank=True, on_delete=models.SET_NULL, related_name="referral_purchases", editable=False)
+    social_discount_amount = models.DecimalField("Ijtimoiy chegirma", max_digits=14, decimal_places=2, default=0, editable=False)
     TYPE_SELF = 'self'
     TYPE_FAMILY = 'family'
     PURCHASE_TYPES = (
@@ -1055,13 +1088,14 @@ class MiniAppPurchase(models.Model):
     def minimum_payment(self):
         if not self.is_booking:
             return self.payable_amount
-        minimum = self.MIN_BOOKING_AMOUNT * self.participant_count
+        minimum = PaymentSettings.booking_minimum() * self.participant_count
         return min(minimum, self.payable_amount) if self.paid_amount else minimum
 
 
 class MulticardInvoice(models.Model):
     """One durable invoice per installment; at most one unsettled checkout."""
 
+    paid_at = models.DateTimeField(null=True, blank=True, editable=False)
     purchase = models.ForeignKey(MiniAppPurchase, on_delete=models.PROTECT, related_name='multicard_invoices')
     invoice_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     provider_uuid = models.UUIDField(null=True, blank=True, unique=True)
@@ -1088,6 +1122,7 @@ class MulticardInvoice(models.Model):
 
 
 class MiniAppPurchaseMember(models.Model):
+    eligibility_document = models.ForeignKey("EligibilityDocument", null=True, blank=True, on_delete=models.PROTECT, related_name="enrollments")
     RELATION_SELF = 'self'
     RELATION_FAMILY = 'family'
     RELATIONSHIPS = (
@@ -1351,3 +1386,29 @@ def _recalc_group_debt(client_id, group_id):
         new_debt = remaining if r.pk == latest.pk else Decimal(0)
         if _dec(r.debt) != new_debt:
             TransactionClient.objects.filter(pk=r.pk).update(debt=new_debt)
+
+
+class EligibilityDocument(models.Model):
+    CATEGORIES = (("pensioner", "Pensioner"), ("disability", "Nogironligi bor"), ("student", "Talaba"))
+    telegram_user = models.ForeignKey(TelegramUser, on_delete=models.PROTECT)
+    phone_number = models.CharField(max_length=20)
+    category = models.CharField(max_length=20, choices=CATEGORIES)
+    # Private storage; this relative name is never exposed as a media URL.
+    storage_name = models.CharField(max_length=200, editable=False)
+    original_name = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.get_category_display()} — {self.phone_number}'
+
+
+class PaymentQRDelivery(models.Model):
+    invoice = models.ForeignKey(MulticardInvoice, on_delete=models.CASCADE)
+    member = models.ForeignKey(MiniAppPurchaseMember, on_delete=models.CASCADE)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    last_error = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("invoice", "member"), name="unique_payment_member_qr")]

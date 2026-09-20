@@ -12,3 +12,7 @@ db.sqlite3
 .hermes/
 .hermes-*.png
 gunicorn.service
+
+private_documents/
+
+.playwright-cli/

@@ -31,8 +31,8 @@ from unfold.widgets import (
 
 from .models import (
     Course, Group, Client, Operator, Discount, Transaction, TransactionClient, SubTransaction, Teacher,
-    AttendanceLesson, AttendanceRecord, Expense, RoleConfiguration,
-    EnrollmentQuestionnaire, LegalAcceptance, MiniAppPurchase, MiniAppPurchaseMember, MulticardInvoice,
+    AttendanceLesson, AttendanceRecord, Expense, RoleConfiguration, PaymentSettings,
+    EligibilityDocument, EnrollmentQuestionnaire, LegalAcceptance, MiniAppPurchase, MiniAppPurchaseMember, MulticardInvoice,
     TelegramCampaign, TelegramCampaignRecipient, TelegramUser,
     _recalc_transaction_participants, sub_transaction_shares,
 )
@@ -518,6 +518,7 @@ class ClientAdmin(ModelAdmin):
             **self.admin_site.each_context(request),
             "title": client.full_name,
             "client": client,
+            "eligibility_documents": EligibilityDocument.objects.filter(enrollments__client=client).distinct(),
             "transactions": transactions,
             "joined_groups_count": joined_groups_count,
             "loan_amount": loan_amount,
@@ -643,6 +644,23 @@ class RoleConfigurationForm(forms.ModelForm):
         ).select_related('content_type').order_by('content_type__model', 'codename')
 
 
+@admin.register(PaymentSettings)
+class PaymentSettingsAdmin(ModelAdmin):
+    fields = ('minimum_booking_amount', 'updated_at')
+    readonly_fields = ('updated_at',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        if not self.has_view_or_change_permission(request):
+            raise PermissionDenied
+        return redirect('admin:main_paymentsettings_change', 1)
+
+
 @admin.register(RoleConfiguration)
 class RoleConfigurationAdmin(ModelAdmin):
     form = RoleConfigurationForm
@@ -689,7 +707,6 @@ class OperatorForm(forms.ModelForm):
     class Meta:
         model = Operator
         fields = ('full_name', 'phone_number', 'role', 'password')
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Eski integratsiyalar rol yubormasa, sotuvchi sifatida davom etadi.
@@ -728,7 +745,13 @@ class OperatorAdmin(ModelAdmin):
     list_display = ('full_name', 'phone_number', 'role_badge', 'user')
     search_fields = ('full_name', 'phone_number', 'user__username')
     list_filter = ('role',)
-    fields = ('full_name', 'phone_number', 'role', 'password')
+    fields = ('full_name', 'phone_number', 'role', 'password', 'referral_link')
+    readonly_fields = ('referral_link',)
+
+    @admin.display(description='Referal havola')
+    def referral_link(self, obj):
+        from .feature_views import referral_link
+        return referral_link(obj) if obj else 'Avval saqlang'
 
     @display(description=_("Rol"), label=True)
     def role_badge(self, obj):
@@ -1079,7 +1102,7 @@ class ReceivePaymentForm(forms.Form):
     )
     payment_method = forms.ChoiceField(
         label=_("To'lov turi"),
-        choices=SubTransaction.METHODS,
+        choices=SubTransaction.METHODS[:3],
         initial=SubTransaction.METHOD_CASH,
         widget=UnfoldAdminSelectWidget(attrs={'data-receipt-toggle': 'true'}),
         help_text=_("Naqd pulda chek shart emas, qolgan turlarda chek majburiy."),
@@ -1128,7 +1151,7 @@ class TransactionAdmin(ModelAdmin):
         'discount_total', 'source', 'confirmed_badge', 'refunded_badge', 'total_debt_display', 'date',
     )
     list_display_links = None
-    list_filter = ('is_confirmed', 'is_refunded', 'payment_type', 'source', 'operator', 'group')
+    list_filter = ('is_confirmed', 'is_refunded', 'payment_method', 'payment_type', 'source', 'operator', 'group')
     search_fields = ('clients__full_name', 'operator__full_name')
     readonly_fields = (
         'course_price', 'discount_total',
@@ -1284,7 +1307,7 @@ class TransactionAdmin(ModelAdmin):
     fieldsets = (
         (None, {
             'fields': (
-                'operator', 'group', 'date', 'amount', 'payment_type',
+                'operator', 'group', 'date', 'amount', 'payment_type', 'payment_method',
                 'discount', 'screenshot',
             ),
         }),
@@ -2134,7 +2157,7 @@ class TelegramUserAdmin(ModelAdmin):
     )
     list_filter = ('onboarding_step',)
     search_fields = ('full_name', 'phone_number', 'username', '=telegram_id')
-    readonly_fields = ('telegram_id', 'created_at', 'updated_at')
+    readonly_fields = ('referrer', 'telegram_id', 'created_at', 'updated_at')
     autocomplete_fields = ('client',)
 
     @display(description=_("Foydalanish shartlari"), boolean=True)
@@ -2335,7 +2358,7 @@ class MiniAppPurchaseMemberInline(TabularInline):
     model = MiniAppPurchaseMember
     extra = 0
     autocomplete_fields = ('client',)
-    readonly_fields = ('created_at',)
+    readonly_fields = ('created_at', 'eligibility_document')
 
 
 class MulticardInvoiceInline(TabularInline):
@@ -2367,10 +2390,14 @@ class MiniAppPurchaseAdmin(ModelAdmin):
         'telegram_user__full_name', 'telegram_user__phone_number',
         'members__full_name', 'members__phone_number', 'payment_reference',
     )
-    readonly_fields = ('uuid', 'discount_name', 'discount_per_person', 'created_at', 'updated_at', 'paid_at', 'booking_discount',
+    readonly_fields = ('referrer', 'social_discount_amount', 'uuid', 'discount_name', 'discount_per_person', 'created_at', 'updated_at', 'paid_at', 'booking_discount',
                        'discount_amount', 'paid_amount', 'balance')
     autocomplete_fields = ('telegram_user', 'course')
     inlines = (MiniAppPurchaseMemberInline, MulticardInvoiceInline,)
+
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        return queryset.filter(referrer=request.user.operator) if _is_plain_operator(request) else queryset
 
     def get_readonly_fields(self, request, obj=None):
         fields = super().get_readonly_fields(request, obj)

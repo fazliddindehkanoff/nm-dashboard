@@ -68,6 +68,10 @@ def can_view_discounts(request):
     return _has_permission(request, 'main.view_discount')
 
 
+def can_view_payment_settings(request):
+    return _has_permission(request, 'main.view_paymentsettings') or _has_permission(request, 'main.change_paymentsettings')
+
+
 def can_view_transactions(request):
     return _has_permission(request, 'main.view_transaction')
 
@@ -102,3 +106,7 @@ def permission_required(permission):
 def is_not_plain_operator(request):
     """Eski sozlamalar bilan moslik uchun: operator bo'lmagan foydalanuvchi."""
     return not is_operator(request.user)
+
+
+def can_view_referrals(request):
+    return request.user.is_active and (is_operator(request.user) or request.user.has_perm('main.view_operator'))

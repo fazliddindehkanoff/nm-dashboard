@@ -30,3 +30,11 @@
 .attendance-awaiting{text-align:center;background:#fff;border:1px solid var(--line);border-radius:20px;padding:27px 20px}.attendance-awaiting__icon{width:52px;height:52px;border-radius:17px;background:var(--ice);color:var(--turquoise-dark);display:grid;place-items:center;font-size:26px;margin:0 auto 14px}.attendance-awaiting h3{font-size:16px;margin:0}.attendance-awaiting p{color:var(--muted);font-size:12px;line-height:1.55;margin:8px 0 15px}.attendance-awaiting div{display:flex;flex-wrap:wrap;justify-content:center;gap:6px}.attendance-awaiting div span{background:#f1f5f7;border-radius:99px;padding:6px 9px;font-size:9px}
 @media(max-width:370px){.overview-featured__foot{align-items:flex-start;flex-direction:column}.course-card__schedule{grid-template-columns:1fr}.attendance-summary{grid-template-columns:1fr 1fr}.attendance-summary span:last-child{grid-column:1/-1}}
 .booking-choice{flex-basis:100%;width:100%}.sticky-total:has(.booking-choice){flex-wrap:wrap}.booking-choice select{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);font:inherit}.booking-choice p{font-size:12px;line-height:1.5;margin:8px 0 0}.summary-row strong{text-align:right}.summary-row{gap:12px}.purchase-card__head{flex-wrap:wrap}.purchase-card__head .status{white-space:normal}.booking-choice select:focus-visible{outline:2px solid var(--turquoise-dark);outline-offset:2px}#bookingQuestionnaire{width:100%;margin-top:12px}#installmentField .muted{font-size:12px;line-height:1.5}
+
+.course-banner { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 16px; margin-bottom: 18px; }
+.eligibility-fields { margin: 16px 0; padding: 16px; border: 1px solid #dfe5e4; border-radius: 14px; }
+.eligibility-fields select, .eligibility-fields input { width: 100%; font: inherit; padding: 10px; border: 1px solid #dfe5e4; border-radius: 8px; background: white; }
+.eligibility-fields small { line-height: 1.5; }
+.eligibility-fields [hidden] { display: none; }
+#paymentResultView .summary-row { text-align: left; padding: 14px 0; }
+#paymentResultView button { margin-top: 14px; }

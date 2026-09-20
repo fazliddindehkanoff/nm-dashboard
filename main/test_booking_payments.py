@@ -242,6 +242,7 @@ class BookingMigrationTests(TransactionTestCase):
                 telegram_user_id=account.pk, course_id=course.pk, unit_price=1500000, total_amount=1500000)
             executor = MigrationExecutor(connection)
             executor.migrate(new)
+            executor.migrate(executor.loader.graph.leaf_nodes())
             purchase = MiniAppPurchase.objects.get(pk=purchase.pk)
             self.assertEqual(purchase.paid_amount, 1500000)
             self.assertEqual(purchase.remaining_amount, 0)
@@ -250,4 +251,5 @@ class BookingMigrationTests(TransactionTestCase):
             self.assertEqual(purchase.multicard_invoices.get().payment_uuid, invoice.payment_uuid)
             self.assertEqual(MiniAppPurchase.objects.get(pk=pending.pk).paid_amount, 0)
         finally:
-            MigrationExecutor(connection).migrate(new)
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes())

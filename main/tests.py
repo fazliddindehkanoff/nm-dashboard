@@ -801,6 +801,7 @@ class TransactionInlineClientTestCase(TestCase):
             'group': str(self.group.pk),
             'date': '2026-01-01',
             'amount': '500000',
+            'payment_method': 'naqd',
             'payment_type': 'naqd',
             'discount': '',
             'participants-TOTAL_FORMS': '2',
@@ -1190,7 +1191,7 @@ class SubTransactionReceiptRuleTestCase(TestCase):
 
     def test_card_payment_rejected_without_receipt(self):
         response = self._post({
-            'amount': '200000', 'clients': [self.client_obj.pk], 'payment_method': 'karta',
+            'amount': '200000', 'clients': [self.client_obj.pk], 'payment_method': 'terminal',
         })
         response.render()
 
@@ -1201,12 +1202,12 @@ class SubTransactionReceiptRuleTestCase(TestCase):
     def test_card_payment_accepted_with_receipt(self):
         response = self._post({
             'amount': '200000', 'clients': [self.client_obj.pk],
-            'payment_method': 'karta', 'screenshot': _receipt(),
+            'payment_method': 'terminal', 'screenshot': _receipt(),
         })
 
         self.assertEqual(response.status_code, 302)
         sub_transaction = SubTransaction.objects.get(transaction=self.tx)
-        self.assertEqual(sub_transaction.payment_method, 'karta')
+        self.assertEqual(sub_transaction.payment_method, 'terminal')
         self.assertTrue(sub_transaction.screenshot)
 
     def test_model_clean_enforces_receipt_for_non_cash(self):
@@ -1348,7 +1349,7 @@ class SubTransactionApprovalTestCase(TestCase):
         from main.admin import _review_sub_transaction
 
         sub_transaction = SubTransaction.objects.create(
-            transaction=self.tx, amount=Decimal('100000'), payment_method='karta',
+            transaction=self.tx, amount=Decimal('100000'), payment_method='terminal',
             received_by=self.superuser,
         )
         sub_transaction.clients.set([self.client_obj])
@@ -1400,7 +1401,7 @@ class SubTransactionApprovalTestCase(TestCase):
         from main.admin import SubTransactionAdmin
 
         sub_transaction = SubTransaction.objects.create(
-            transaction=self.tx, amount=Decimal('100000'), payment_method='karta',
+            transaction=self.tx, amount=Decimal('100000'), payment_method='terminal',
             screenshot=_receipt(), received_by=self.superuser,
         )
         sub_transaction.clients.set([self.client_obj])

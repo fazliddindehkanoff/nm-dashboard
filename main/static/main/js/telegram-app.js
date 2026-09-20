@@ -44,14 +44,14 @@
   const csrf = $('meta[name="csrf-token"]').content;
 
   function headers(json = false) {
-    const result = { 'X-Telegram-Init-Data': tg?.initData || '' };
+    const result = { 'X-Telegram-Init-Data': tg?.initData || '', 'X-CSRFToken': csrf };
     if (document.body.dataset.demo === '1') result['X-Telegram-Demo'] = '1';
     if (json) Object.assign(result, { 'Content-Type': 'application/json', 'X-CSRFToken': csrf });
     return result;
   }
 
   async function api(url, options = {}) {
-    const response = await fetch(url, { ...options, headers: { ...headers(Boolean(options.body)), ...(options.headers || {}) } });
+    const response = await fetch(url, { ...options, headers: { ...headers(typeof options.body === 'string'), ...(options.headers || {}) } });
     const data = await response.json().catch(() => ({ ok: false, error: 'Server javobi noto‘g‘ri.' }));
     if (!response.ok || !data.ok) throw new Error(data.error || 'Xatolik yuz berdi.');
     return data;
@@ -209,6 +209,7 @@
     $('#courseCount').textContent = `${state.courses.length} ta`;
     $('#courseList').innerHTML = state.courses.length ? state.courses.map(course => `
       <article class="course-card">
+        ${course.active_groups[0]?.banner_url ? `<img class="course-banner" src="${escapeHtml(course.active_groups[0].banner_url)}" alt="${escapeHtml(course.name)}" loading="lazy">` : ''}
         <div class="course-card__top"><span class="course-mark"><img src="/static/main/brand/norbekov-mark.svg" alt=""></span>
           <div><span class="availability"><i></i> Faol guruh bor</span><h3>${escapeHtml(course.name)}</h3><p>${course.number_of_days || 0} kunlik rivojlanish dasturi</p></div>
         </div>
@@ -315,6 +316,7 @@
   function startCheckout(courseId) {
     state.course = state.courses.find(course => course.id === courseId); state.purchase = null; state.type = 'self';
     $('#checkoutCourse').textContent = state.course.name; $$('.segment__item').forEach((node, i) => node.classList.toggle('is-active', i === 0));
+    $('#selfEligibility').innerHTML = eligibilityFields(); bindEligibility($('#selfEligibility'));
     $('#paymentMode').value = 'booking'; $('#familyArea').hidden = true; $('#familyMembers').innerHTML = ''; updateTotal(); showView('checkoutView', 1);
   }
 
@@ -323,13 +325,18 @@
     const price = Number(state.course?.price || 0);
     const discount = Math.min(price, Math.max(0, ...(state.course?.participant_discounts || [])
       .filter(rule => participants >= rule.min_participants).map(rule => Number(rule.amount))));
-    $('#liveTotal').textContent = money((price - discount) * participants);
+    const eligibilityNodes = [$('#selfEligibility'), ...(state.type === 'family' ? $$('.family-member') : [])];
+    const eligible = eligibilityNodes.filter(node => $('[name="eligibility_category"]', node)?.value).length;
+    const socialDiscount = Math.min(100000, price - discount) * eligible;
+    const total = (price - discount) * participants - socialDiscount;
+    $('#socialDiscountLabel').textContent = socialDiscount ? `Hujjat asosida qo‘shimcha chegirma: −${money(socialDiscount)}` : '';
+    $('#liveTotal').textContent = money(total);
     $('#participantLabel').textContent = `${participants} ishtirokchi`;
     $('#discountLabel').hidden = !discount;
     $('#discountLabel').textContent = discount ? `Chegirma: har bir kishiga −${money(discount)}` : '';
-    const bookingDiscount = Math.min(price - discount, Number(state.course?.booking_discount || 0)) * participants;
+    const bookingDiscount = Math.min(total, Math.min(price - discount, Number(state.course?.booking_discount || 0)) * participants);
     const minimum = Number(state.course?.minimum_booking || 100000) * participants;
-    const net = (price - discount) * participants - bookingDiscount;
+    const net = total - bookingDiscount;
     const bookingOption = $('#paymentMode option[value="booking"]');
     bookingOption.disabled = net < minimum;
     if (bookingOption.disabled) $('#paymentMode').value = 'full';
@@ -338,11 +345,37 @@
       : 'Kursning to‘liq summasi bir martada to‘lanadi.';
   }
 
+  function eligibilityFields() {
+    return `<div class="eligibility-fields"><label class="field">Qo‘shimcha chegirma<select name="eligibility_category"><option value="">Toifaga kirmayman</option><option value="pensioner">Pensioner</option><option value="disability">Nogironligi bor</option><option value="student">Talaba</option></select></label><label class="field eligibility-file" hidden>Tasdiqlovchi hujjat<input type="file" name="eligibility_file" accept=".pdf,.jpg,.jpeg,.png"><small>PDF, JPG yoki PNG, 5 MB gacha. Hujjat asosida 100 000 so‘mgacha chegirma.</small></label></div>`;
+  }
+
+  function bindEligibility(node) {
+    $('[name="eligibility_category"]', node).addEventListener('change', event => {
+      $('.eligibility-file', node).hidden = !event.target.value;
+      delete node.dataset.proofKey; delete node.dataset.proofId; updateTotal();
+    });
+    $('[name="eligibility_file"]', node).addEventListener('change', () => { delete node.dataset.proofKey; });
+  }
+
+  async function uploadProof(node, phone) {
+    const category = $('[name="eligibility_category"]', node).value;
+    if (!category) return null;
+    const file = $('[name="eligibility_file"]', node).files[0];
+    if (!file || file.size > 5 * 1024 * 1024) throw new Error('Chegirma uchun 5 MB gacha tasdiqlovchi hujjat yuboring.');
+    const key = `${category}:${phone}:${file.name}:${file.size}:${file.lastModified}`;
+    if (node.dataset.proofKey === key) return Number(node.dataset.proofId);
+    const body = new FormData(); body.append('category', category); body.append('phone_number', phone); body.append('document', file);
+    const result = await api('/telegram-app/api/eligibility-documents/', { method: 'POST', body });
+    node.dataset.proofKey = key; node.dataset.proofId = result.id;
+    return result.id;
+  }
+
   function addFamilyMember() {
     if ($$('.family-member').length >= 7) return toast('Ko‘pi bilan 7 ta oila a’zosi qo‘shiladi.', true);
     const number = $$('.family-member').length + 1;
     const node = document.createElement('div'); node.className = 'family-member';
     node.innerHTML = `<div class="family-member__number">${number}-oila a’zosi</div><button class="remove-member" type="button" aria-label="O‘chirish">×</button><div class="field"><label>To‘liq ism</label><input name="full_name" autocomplete="name" placeholder="Ism Familiya" required></div><div class="field"><label>Telefon raqami</label><input name="phone_number" type="tel" autocomplete="tel" placeholder="+998 90 123 45 67" required></div>`;
+    node.insertAdjacentHTML('beforeend', eligibilityFields()); bindEligibility(node);
     $('.remove-member', node).addEventListener('click', () => { node.remove(); renumberMembers(); updateTotal(); });
     $('#familyMembers').append(node); updateTotal();
   }
@@ -351,12 +384,15 @@
 
   async function createPurchase() {
     const button = $('#continueToPayment');
-    const members = $$('.family-member').map(node => ({ full_name: $('[name="full_name"]', node).value.trim(), phone_number: $('[name="phone_number"]', node).value.trim() }));
+    const memberNodes = state.type === 'family' ? $$('.family-member') : [];
+    const members = memberNodes.map(node => ({ full_name: $('[name="full_name"]', node).value.trim(), phone_number: $('[name="phone_number"]', node).value.trim() }));
     if (state.type === 'family' && !members.length) return toast('Kamida bitta oila a’zosini qo‘shing.', true);
     if (members.some(member => !member.full_name || !member.phone_number)) return toast('Oila a’zolari ma’lumotlarini to‘liq kiriting.', true);
     button.disabled = true;
     try {
-      const data = await api('/telegram-app/api/purchases/', { method: 'POST', body: JSON.stringify({ course_id: state.course.id, purchase_type: state.type, members, payment_mode: $('#paymentMode').value }) });
+      const eligibility_document_id = await uploadProof($('#selfEligibility'), state.profile.phone_number);
+      for (let index = 0; index < members.length; index++) members[index].eligibility_document_id = await uploadProof(memberNodes[index], members[index].phone_number);
+      const data = await api('/telegram-app/api/purchases/',  { method: 'POST', body: JSON.stringify({ course_id: state.course.id, purchase_type: state.type, members, eligibility_document_id, payment_mode: $('#paymentMode').value }) });
       state.purchase = data.purchase; state.purchases.unshift(data.purchase); renderHistory(); openContract(data.purchase);
     } catch (error) { toast(error.message, true); } finally { button.disabled = false; }
   }
@@ -371,8 +407,9 @@
     const row = (label, value) => `<div class="summary-row"><span>${label}</span><strong>${value}</strong></div>`;
     $('#paymentSummary').innerHTML = row('Kurs', escapeHtml(p.course))
       + row('Ishtirokchilar', `${p.participant_count} kishi`)
-      + row('Kurs narxi — jami', money(Number(p.total_amount) + Number(p.discount_total || 0)))
+      + row('Kurs narxi — jami', money(Number(p.total_amount) + Number(p.discount_total || 0) + Number(p.social_discount_amount || 0)))
       + (Number(p.discount_total) > 0 ? row(escapeHtml(p.discount_name), `−${money(p.discount_total)}`) : '')
+      + (Number(p.social_discount_amount) > 0 ? row('Hujjat asosidagi chegirma', `−${money(p.social_discount_amount)}`) : '')
       + (p.is_booking ? row(Number(p.paid_amount) > 0 ? 'Bron chegirmasi' : 'To‘lovdan keyingi bron chegirmasi', `−${money(p.booking_discount)}`) : '')
       + row('To‘langan', money(p.paid_amount))
       + row('Qolgan to‘lov', money(p.payable_amount));
@@ -441,12 +478,24 @@
     }
   }
 
+  function showPaymentResult(purchase, previousPaid = 0) {
+    try { localStorage.removeItem('nmPaymentAttempt'); } catch (_) {}
+      $('#paymentResultAmount').textContent = money(Number(purchase.paid_amount) - previousPaid);
+      $('#paymentResultPaid').textContent = money(purchase.paid_amount);
+      $('#paymentResultDebt').textContent = money(purchase.remaining_amount);
+      $('#paymentResultNote').textContent = Number(purchase.remaining_amount) > 0 ? 'Bron qabul qilindi. Qolgan summani keyinroq to‘lashingiz mumkin.' : 'Kurs uchun to‘lov to‘liq yakunlandi.';
+      showView('paymentResultView', 2);
+  }
+
   function applyPayment(purchase) {
     replacePurchase(purchase);
     if (state.purchase?.id !== purchase.id) return;
     const previousPaid = Number(state.purchase.paid_amount || 0);
     state.purchase = purchase;
-    if (purchase.payment_status === 'partial' && Number(purchase.paid_amount) > previousPaid) toast('Bron to‘lovi qabul qilindi. Chegirma hisoblandi.');
+    if (['partial', 'success'].includes(purchase.payment_status) && Number(purchase.paid_amount) > previousPaid) {
+      showPaymentResult(purchase, previousPaid);
+      return;
+    }
     if (purchase.payment_status === 'success') {
       if (!$('#paymentView').classList.contains('is-active')) return;
       if (purchase.questionnaire_completed) showSuccess(purchase);
@@ -459,6 +508,7 @@
     const purchaseId = state.purchase.id;
     if (state.purchase.is_booking && !$('#installmentAmount').reportValidity()) return;
     const payload = state.purchase.is_booking ? { amount: $('#installmentAmount').value, expected_paid: state.purchase.paid_amount } : {};
+    try { localStorage.setItem('nmPaymentAttempt', JSON.stringify({ id: purchaseId, paid: state.purchase.paid_amount })); } catch (_) {}
     const button = $('#payButton'); button.disabled = true; button.textContent = 'To‘lov tayyorlanmoqda…';
     try {
       const endpoint = document.body.dataset.demo === '1' ? 'demo-payment' : 'payment';
@@ -544,6 +594,16 @@
       const data = await api('/telegram-app/api/bootstrap/'); Object.assign(state, { profile: data.profile, courses: data.courses, myCourses: data.my_courses || [], purchases: data.purchases });
       renderProfile(); renderLearningOverview(); renderMyCourses(); renderCourses(); renderHistory();
       if (data.legal.terms_required) openTerms(true);
+      else {
+        let attempt;
+        try { attempt = JSON.parse(localStorage.getItem('nmPaymentAttempt')); } catch (_) {}
+        const purchase = attempt && state.purchases.find(item => item.id === attempt.id);
+        if (purchase) {
+          state.purchase = purchase;
+          if (['partial', 'success'].includes(purchase.payment_status) && Number(purchase.paid_amount) > Number(attempt.paid)) showPaymentResult(purchase, Number(attempt.paid));
+          else resumePurchase(purchase.id);
+        }
+      }
     } catch (error) {
       $('#courseList').innerHTML = `<article class="course-card"><h3>Ilovani ochib bo‘lmadi</h3><p>${escapeHtml(error.message)} Telegram bot ichidagi tugma orqali qayta urinib ko‘ring.</p></article>`;
       toast(error.message, true);
@@ -554,6 +614,7 @@
   $('#paymentMode').addEventListener('change', updateTotal);
   $('#payRemaining').addEventListener('click', () => { $('#installmentAmount').value = state.purchase.payable_amount; });
   $('#bookingQuestionnaire').addEventListener('click', () => { renderQuestionnaires(); showView('questionnaireView', 3); });
+  $('#continueAfterPayment').addEventListener('click', () => { if (state.purchase.questionnaire_completed) showSuccess(state.purchase); else { renderQuestionnaires(); showView('questionnaireView', 3); } });
   $('#addFamilyMember').addEventListener('click', addFamilyMember); $('#continueToPayment').addEventListener('click', createPurchase); $('#payButton').addEventListener('click', startPayment); $('#questionnaireForm').addEventListener('submit', submitQuestionnaire);
   $('#acceptTerms').addEventListener('click', acceptTerms); $('#acceptContract').addEventListener('click', acceptContract);
   $('#viewTerms').addEventListener('click', () => openTerms(false)); $('#viewContract').addEventListener('click', () => openContract(state.purchase, true));

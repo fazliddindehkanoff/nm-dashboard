@@ -1,0 +1,14 @@
+{% extends 'unfold/layouts/base.html' %}
+{% load money %}
+{% block content %}
+<div class="p-6"><div class="flex justify-between items-center mb-6"><h1 class="text-2xl font-semibold">To‘lovlar</h1>{% if can_add %}<a class="bg-primary-600 text-white rounded px-4 py-2" href="{% url 'admin:main_transaction_add' %}">To‘lov qo‘shish</a>{% endif %}</div>
+<form method="get" class="flex flex-wrap gap-3 mb-6">
+<input class="border rounded p-2" aria-label="Qidirish" name="q" placeholder="Mijoz yoki kurs" value="{{ request.GET.q }}">
+<select class="border rounded p-2" aria-label="To‘lov usuli" name="method"><option value="">Barcha usullar</option>{% for value,label in methods %}<option value="{{ value }}" {% if selected_method == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+<select class="border rounded p-2" aria-label="To‘lov holati" name="status"><option value="">Barcha holatlar</option>{% for value,label in statuses %}<option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+<label>Dan <input class="border rounded p-2" type="date" name="from" value="{{ request.GET.from }}"></label><label>Gacha <input class="border rounded p-2" type="date" name="to" value="{{ request.GET.to }}"></label><button class="bg-primary-600 text-white rounded px-4 py-2">Filtrlash</button></form>
+<p class="mb-4">Tasdiqlangan to‘lovlar: <strong>{{ total|money }} so‘m</strong> · {{ page.paginator.count }} ta yozuv</p>
+<div class="overflow-x-auto"><table class="w-full"><thead><tr><th class="p-3 text-left">Sana</th><th class="p-3 text-left">Mijoz / kurs</th><th class="p-3 text-left">Summa</th><th class="p-3 text-left">Usul</th><th class="p-3 text-left">Holat</th><th class="p-3 text-left">Manba</th></tr></thead><tbody>
+{% for row in page %}<tr class="border-t"><td class="p-3">{{ row.date|date:'d.m.Y' }}</td><td class="p-3">{% if row.link %}<a class="text-primary-600 underline" href="{{ row.link }}">{{ row.name|default:'—' }}</a>{% else %}{{ row.name|default:'—' }}{% endif %}<div class="text-sm">{{ row.course }}</div></td><td class="p-3">{{ row.amount|money }} so‘m</td><td class="p-3">{{ row.method }}</td><td class="p-3">{{ row.status_label }}</td><td class="p-3">{{ row.source }} · {{ row.reference }}</td></tr>{% empty %}<tr><td colspan="6" class="p-6">To‘lovlar topilmadi.</td></tr>{% endfor %}
+</tbody></table></div><div class="flex gap-4 mt-6">{% if page.has_previous %}<a href="?{{ query }}&page={{ page.previous_page_number }}">← Oldingi</a>{% endif %}<span>{{ page.number }} / {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?{{ query }}&page={{ page.next_page_number }}">Keyingi →</a>{% endif %}</div></div>
+{% endblock %}

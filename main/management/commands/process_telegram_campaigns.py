@@ -30,6 +30,8 @@ class Command(BaseCommand):
         self.stdout.write('Telegram campaign worker started')
         while not self._stop:
             try:
+                from main.services.payment_notifications import process_payment_notifications
+                process_payment_notifications()
                 campaign = next_campaign()
                 if campaign:
                     process_campaign(campaign)

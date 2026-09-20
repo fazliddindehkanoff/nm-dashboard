@@ -151,7 +151,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'uz'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Tashkent'
 
 USE_I18N = True
 
@@ -188,6 +188,7 @@ AMOCRM = {
 # BotFather bergan tokenni TELEGRAM_BOT_TOKEN, guruh chat ID sini esa
 # TELEGRAM_CHAT_ID muhit o'zgaruvchisiga bering (masalan -1001234567890).
 TELEGRAM = {
+    "BOT_USERNAME": os.environ.get("TELEGRAM_BOT_USERNAME", ""),
     "BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
     "CHAT_ID": os.environ.get("TELEGRAM_CHAT_ID", ""),
     "WEB_APP_URL": os.environ.get("TELEGRAM_WEB_APP_URL", ""),
@@ -229,7 +230,7 @@ def _is_unconfirmed_transactions_view(request):
 
 def _is_payments_view(request):
     return (
-        _in_transaction_changelist(request)
+        (request.path == "/payments/" or _in_transaction_changelist(request))
         and request.GET.get("is_refunded__exact") != "1"
         and request.GET.get("is_confirmed__exact") != "0"
     )
@@ -371,6 +372,12 @@ UNFOLD = {
                         "permission": "main.permissions.can_manage_users",
                     },
                     {
+                        "title": "To'lov sozlamalari",
+                        "icon": "settings",
+                        "link": "/admin/main/paymentsettings/",
+                        "permission": "main.permissions.can_view_payment_settings",
+                    },
+                    {
                         "title": "Chegirmalar",
                         "icon": "sell",
                         "link": "/admin/main/discount/",
@@ -382,31 +389,12 @@ UNFOLD = {
                 "title": "Moliya",
                 "separator": True,
                 "items": [
+                    {"title": "Referal havolalar", "icon": "link", "link": "/referrals/", "permission": "main.permissions.can_view_referrals"},
                     {
                         "title": "To'lovlar",
                         "icon": "payments",
-                        "link": "/admin/main/transaction/",
+                        "link": "/payments/",
                         "active": _is_payments_view,
-                        "permission": "main.permissions.can_view_transactions",
-                    },
-                    {
-                        "title": "Tasdiqlash navbati",
-                        "icon": "pending_actions",
-                        "link": "/admin/main/transaction/?is_confirmed__exact=0",
-                        "active": _is_unconfirmed_transactions_view,
-                        "permission": "main.permissions.can_view_transactions",
-                    },
-                    {
-                        "title": "Ichki to'lovlar",
-                        "icon": "receipt_long",
-                        "link": "/admin/main/subtransaction/?status__exact=pending",
-                        "permission": "main.permissions.can_view_subtransactions",
-                    },
-                    {
-                        "title": "Qaytarilganlar",
-                        "icon": "assignment_return",
-                        "link": "/admin/main/transaction/?is_refunded__exact=1",
-                        "active": _is_refunded_transactions_view,
                         "permission": "main.permissions.can_view_transactions",
                     },
                     {

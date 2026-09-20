@@ -6,7 +6,7 @@ import ipaddress
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from main.models import LegalAcceptance
+from main.models import LegalAcceptance, PaymentSettings
 
 
 TERMS_VERSION = '2026-09-03'
@@ -15,7 +15,12 @@ BOOKING_CONTRACT_VERSION = '2026-09-16.booking'
 
 
 def contract_version(purchase):
-    return BOOKING_CONTRACT_VERSION if purchase.is_booking else CONTRACT_VERSION
+    if not purchase.is_booking:
+        return CONTRACT_VERSION
+    minimum = PaymentSettings.booking_minimum()
+    if minimum == 100000:
+        return BOOKING_CONTRACT_VERSION
+    return f'{BOOKING_CONTRACT_VERSION}.{minimum:.0f}'
 
 
 def render_terms_document():
@@ -26,6 +31,7 @@ def render_contract_document(purchase):
     return render_to_string('telegram_app/legal/contract.html', {
         'purchase': purchase,
         'contract_date': timezone.localtime(purchase.created_at).date(),
+        'minimum_booking_display': f'{PaymentSettings.booking_minimum():,.0f}'.replace(',', ' ') if purchase.is_booking else '',
     })
 
 

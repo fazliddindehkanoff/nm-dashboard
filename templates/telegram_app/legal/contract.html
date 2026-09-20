@@ -6,10 +6,11 @@
     <p><span>Telefon</span><strong>{{ purchase.telegram_user.phone_number }}</strong></p>
     <p><span>Kurs</span><strong>{{ purchase.course.name }}</strong></p>
     <p><span>Ishtirokchilar</span><strong>{{ purchase.participant_count }} kishi</strong></p>
+    {% if purchase.social_discount_amount %}<p><span>Hujjat asosida hisoblangan ijtimoiy chegirma</span><strong>{{ purchase.social_discount_amount|floatformat:0 }} UZS</strong></p>{% endif %}
     <p><span>Jami xizmat haqi</span><strong>{{ purchase.total_amount|floatformat:0 }} UZS</strong></p>
     {% if purchase.is_booking %}
     <p><span>Bron to‘lovi tasdiqlangach qo‘llanadigan chegirma</span><strong>{{ purchase.booking_discount|floatformat:0 }} UZS</strong></p>
-    <p><span>Har bir ishtirokchi uchun eng kam bron to‘lovi</span><strong>100 000 UZS</strong></p>
+    <p><span>Har bir ishtirokchi uchun eng kam bron to‘lovi</span><strong>{{ minimum_booking_display }} UZS</strong></p>
     <p>Bron to‘lovi kurs narxining bir qismi hisoblanadi. To‘lov tasdiqlangach bron chegirmasi har bir ishtirokchiga bir marta qo‘llanadi. Qolgan qarz — jami xizmat haqi, chegirma va tasdiqlangan to‘lovlar farqi. Qolgan summani keyingi to‘lovlar bilan to‘lash mumkin.</p>
     {% endif %}
   </div>
@@ -33,7 +34,7 @@
   <p><strong>3.1.</strong> Ijrochi tomonidan Buyurtmachiga ko‘rsatiladigan xizmatlar haqi ushbu xarid ma’lumotlarida ko‘rsatilgan jami summani tashkil etadi.</p>
   <p><strong>3.2.</strong> To‘lov Telegram Mini App’da taqdim etilgan to‘lov usuli orqali amalga oshiriladi.</p>
   {% if purchase.is_booking %}
-  <p><strong>3.3.</strong> Kursdagi joyni bron qilish uchun Buyurtmachi har bir ishtirokchiga kamida 100 000 UZS to‘laydi. Bron to‘lovi xizmat haqining bir qismi bo‘lib, tasdiqlangach yuqorida ko‘rsatilgan chegirma qo‘llanadi; qolgan summa keyingi to‘lovlarda to‘lanadi.</p>
+  <p><strong>3.3.</strong> Kursdagi joyni bron qilish uchun Buyurtmachi har bir ishtirokchiga kamida {{ minimum_booking_display }} UZS to‘laydi. Bron to‘lovi xizmat haqining bir qismi bo‘lib, tasdiqlangach yuqorida ko‘rsatilgan chegirma qo‘llanadi; qolgan summa keyingi to‘lovlarda to‘lanadi.</p>
   {% else %}
   <p><strong>3.3.</strong> Buyurtmachi xizmat haqini kursdagi joy tasdiqlanishidan oldin amalga oshirishi lozim.</p>
   {% endif %}

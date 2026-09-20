@@ -17,6 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import (
+    EligibilityDocument,
     AttendanceLesson,
     AttendanceRecord,
     Client,
@@ -29,6 +30,7 @@ from .models import (
     MiniAppPurchaseMember,
     MulticardInvoice,
     Operator,
+    PaymentSettings,
     TelegramUser,
 )
 from .services.booking import booking_discount_for, check_payment_version, payment_amount
@@ -147,7 +149,7 @@ def process_telegram_update(update, request=None):
         return
 
     with transaction.atomic():
-        account, _ = TelegramUser.objects.get_or_create(
+        account, created = TelegramUser.objects.get_or_create(
             telegram_id=telegram_id,
             defaults={'username': sender.get('username', '')},
         )
@@ -156,6 +158,13 @@ def process_telegram_update(update, request=None):
             account.save(update_fields=('username', 'updated_at'))
 
         text = (message.get('text') or '').strip()
+        if created and text.startswith('/start ref_'):
+            try:
+                code = uuid.UUID(text.split('ref_', 1)[1])
+                account.referrer = Operator.objects.filter(referral_code=code, user__is_active=True, role='operator').first()
+                account.save(update_fields=('referrer', 'updated_at'))
+            except (ValueError, TypeError):
+                pass
         contact = message.get('contact') or {}
         if text.startswith('/start'):
             if account.onboarding_step == TelegramUser.STEP_READY and account.phone_number:
@@ -257,6 +266,7 @@ def _purchase_payload(purchase):
         'purchase_type_label': purchase.get_purchase_type_display(),
         'unit_price': str(purchase.unit_price),
         'discount_per_person': str(purchase.discount_per_person),
+        'social_discount_amount': str(purchase.social_discount_amount),
         'discount_name': purchase.discount_name,
         'discount_total': str(purchase.discount_per_person * purchase.participant_count),
         'participant_count': purchase.participant_count,
@@ -295,6 +305,7 @@ def _purchase_payload(purchase):
 
 def _active_course_payloads():
     """Return one catalogue entry per course that has a sellable active group."""
+    minimum_booking = PaymentSettings.booking_minimum()
     groups = (
         Group.objects.upcoming()
         .select_related('course')
@@ -310,7 +321,7 @@ def _active_course_payloads():
                 'name': course.name,
                 'price': str(course.price),
                 'booking_discount': str(booking_discount_for(course.price, 1, course.id)),
-                'minimum_booking': str(MiniAppPurchase.MIN_BOOKING_AMOUNT),
+                'minimum_booking': str(minimum_booking),
                 'number_of_days': course.number_of_days,
                 'participant_discounts': [
                     {'name': rule.name, 'amount': str(rule.amount), 'min_participants': rule.min_participants}
@@ -321,6 +332,7 @@ def _active_course_payloads():
         payload = courses[course.id]
         payload['active_groups'].append({
             'id': group.id,
+            'banner_url': group.banner.url if group.banner else '',
             'start_date': group.start_date.isoformat(),
             'number_of_days': group.number_of_days,
             'teachers': [teacher.full_name for teacher in group.teachers.all()],
@@ -632,6 +644,7 @@ def telegram_app_create_purchase(request):
             'full_name': account.full_name,
             'phone_number': _normalise_phone(account.phone_number),
             'relationship': MiniAppPurchaseMember.RELATION_SELF,
+            'eligibility_document_id': data.get('eligibility_document_id'),
         }]
         if purchase_type == MiniAppPurchase.TYPE_FAMILY:
             family_members = data.get('members') or []
@@ -647,6 +660,7 @@ def telegram_app_create_purchase(request):
                     'full_name': full_name[:255],
                     'phone_number': _normalise_phone(member.get('phone_number')),
                     'relationship': MiniAppPurchaseMember.RELATION_FAMILY,
+                    'eligibility_document_id': member.get('eligibility_document_id'),
                 })
         phones = [item['phone_number'] for item in participants]
         if len(set(phones)) != len(phones):
@@ -656,15 +670,30 @@ def telegram_app_create_purchase(request):
             participant_rule = Discount.participant_discount(course.id, len(participants))
             discount_per_person = min(participant_rule.amount, course.price) if participant_rule else Decimal(0)
             unit_price = course.price - discount_per_person
-            total = unit_price * len(participants)
+            eligible = 0
+            for participant in participants:
+                proof_id = participant['eligibility_document_id']
+                if proof_id:
+                    if not isinstance(proof_id, int) or not EligibilityDocument.objects.filter(
+                        pk=proof_id, telegram_user=account, phone_number=participant['phone_number'],
+                    ).exists():
+                        raise ValueError("Chegirma uchun shu ishtirokchining tasdiqlovchi hujjatini yuboring.")
+                    eligible += 1
+                else:
+                    participant['eligibility_document_id'] = None
+            social_discount = min(Decimal(100000), unit_price) * eligible
+            total = unit_price * len(participants) - social_discount
             mode = data.get('payment_mode', 'full')
             if mode not in ('full', 'booking'):
                 raise ValueError("To'lov usulini tanlang.")
             discount = booking_discount_for(unit_price, len(participants), course.id) if mode == 'booking' else Decimal(0)
-            if mode == 'booking' and total - discount < MiniAppPurchase.MIN_BOOKING_AMOUNT * len(participants):
+            discount = min(discount, total)
+            if mode == 'booking' and total - discount < PaymentSettings.booking_minimum() * len(participants):
                 raise ValueError("Bu kurs uchun bron summasi yetarli emas. To'liq to'lovni tanlang.")
             purchase = MiniAppPurchase.objects.create(
                 telegram_user=account,
+                referrer=account.referrer,
+                social_discount_amount=social_discount,
                 course=course,
                 purchase_type=purchase_type,
                 unit_price=unit_price,
