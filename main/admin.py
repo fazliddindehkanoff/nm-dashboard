@@ -6,6 +6,7 @@ from django import forms
 from django.apps import apps
 from django.db import models, transaction as db_transaction
 from django.contrib import admin, messages
+from django.contrib.admin.actions import delete_selected
 from django.contrib.auth.models import User, Permission
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect
@@ -157,12 +158,74 @@ class GroupAdmin(ModelAdmin):
     search_fields = ('course__name', 'teachers__full_name')
     list_filter = ('is_active', 'course', 'start_date')
     autocomplete_fields = ('teachers',)
+    actions = ('archive_groups',)
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if 'delete_selected' in actions:
+            actions['delete_selected'] = (
+                type(self).delete_or_archive_groups,
+                'delete_selected',
+                _("Tanlangan guruhlarni o'chirish / arxivlash"),
+            )
+        return actions
+
+    def delete_or_archive_groups(self, request, queryset):
+        if queryset.filter(attendance_records__isnull=False).exists():
+            return self._archive_confirmation(request, queryset, action_name='delete_selected')
+        return delete_selected(self, request, queryset)
+
+    @admin.action(permissions=['change'], description=_("Tanlangan guruhlarni arxivlash"))
+    def archive_groups(self, request, queryset):
+        return self._archive_confirmation(request, queryset, action_name='archive_groups')
+
+    def _archive_confirmation(self, request, queryset, action_name=''):
+        groups = list(queryset.prefetch_related('teachers', 'course'))
+        if not self.has_change_permission(request) or any(
+            not self.has_change_permission(request, group) for group in groups
+        ):
+            raise PermissionDenied
+        if request.method == 'POST' and request.POST.get('confirm_archive') == 'yes':
+            with db_transaction.atomic():
+                count = queryset.filter(is_active=True).update(is_active=False)
+                for group in groups:
+                    if group.is_active:
+                        self.log_change(request, group, _("Guruh arxivlandi; davomat va to'lov tarixi saqlandi."))
+            self.message_user(request, _("%(count)s ta guruh arxivlandi. Tarix saqlandi.") % {'count': count}, messages.SUCCESS)
+            return redirect('admin:main_group_changelist')
+        return TemplateResponse(request, 'admin/main/group/archive_confirmation.html', {
+            **self.admin_site.each_context(request),
+            'title': _("Guruhlarni arxivlash"),
+            'groups': groups,
+            'opts': self.model._meta,
+            'action_name': action_name,
+            'changelist_url': reverse('admin:main_group_changelist'),
+        })
+
+    def archive_view(self, request, object_id):
+        group = self.get_object(request, object_id)
+        if group is None:
+            return redirect('admin:main_group_changelist')
+        return self._archive_confirmation(request, self.get_queryset(request).filter(pk=group.pk))
+
+    def delete_view(self, request, object_id, extra_context=None):
+        group = self.get_object(request, object_id)
+        if group and group.attendance_records.exists():
+            if not super().has_delete_permission(request, group):
+                raise PermissionDenied
+            return self._archive_confirmation(request, self.get_queryset(request).filter(pk=group.pk))
+        return super().delete_view(request, object_id, extra_context)
 
     # ---- Guruh ustiga bosilganda o'zgartirish emas, detail sahifa ochiladi ----
     def get_urls(self):
         urls = super().get_urls()
         info = self.model._meta.app_label, self.model._meta.model_name
         custom = [
+            path(
+                '<path:object_id>/archive/',
+                self.admin_site.admin_view(self.archive_view),
+                name='%s_%s_archive' % info,
+            ),
             path(
                 "<path:object_id>/detail/",
                 self.admin_site.admin_view(self.group_detail_view),
@@ -269,6 +332,8 @@ class GroupAdmin(ModelAdmin):
             "can_change_attendance": request.user.has_perm('main.change_attendancerecord'),
             "change_url": reverse("admin:main_group_change", args=[group.pk]),
             "delete_url": reverse("admin:main_group_delete", args=[group.pk]),
+            "archive_url": reverse("admin:main_group_archive", args=[group.pk]),
+            "has_archive_permission": group.is_active and self.has_change_permission(request, group),
             "changelist_url": reverse("admin:main_group_changelist"),
             "has_change_permission": self.has_change_permission(request, group),
             "has_delete_permission": self.has_delete_permission(request, group),

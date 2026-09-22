@@ -304,10 +304,11 @@ def _purchase_payload(purchase):
 
 
 def _active_course_payloads():
-    """Return one catalogue entry per course that has a sellable active group."""
+    """List every active group; new sales still require an upcoming group."""
     minimum_booking = PaymentSettings.booking_minimum()
+    today = timezone.localdate()
     groups = (
-        Group.objects.upcoming()
+        Group.objects.filter(is_active=True)
         .select_related('course')
         .prefetch_related('teachers')
         .order_by('course__name', 'start_date', 'id')
@@ -328,13 +329,17 @@ def _active_course_payloads():
                     for rule in Discount.participant_rules(course.id)
                 ],
                 'active_groups': [],
+                'can_purchase': False,
             }
         payload = courses[course.id]
+        can_purchase = group.start_date > today
+        payload['can_purchase'] = payload['can_purchase'] or can_purchase
         payload['active_groups'].append({
             'id': group.id,
             'banner_url': group.banner.url if group.banner else '',
             'start_date': group.start_date.isoformat(),
             'number_of_days': group.number_of_days,
+            'can_purchase': can_purchase,
             'teachers': [teacher.full_name for teacher in group.teachers.all()],
         })
     return list(courses.values())

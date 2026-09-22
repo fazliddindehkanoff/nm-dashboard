@@ -16,10 +16,18 @@ The import defaults to the main table; use `--health-family-discount 200000` if 
 special family price is intended. The later social concession and its different
 booking amount are not automatically imported or inferred from participant count.
 
-The web catalog and new purchases require at least one active group whose start
-date is strictly after today in Asia/Tashkent. Groups starting today are already
-started for this purpose. A course remains visible while another qualifying group
-exists. Existing purchases and attendance remain accessible.
+The Mini App catalog lists every active group, including groups that have already
+started. Each group shows its own start date, duration, teachers and banner.
+New purchases still require an active group whose start date is strictly after
+today in Asia/Tashkent; courses with only started groups show closed enrollment.
+Existing purchases and attendance remain accessible.
+
+Groups with attendance history cannot be permanently deleted. Their delete action
+opens an explicit archive confirmation instead; mixed bulk selections archive all
+selected groups after confirmation. Archiving sets `is_active=False` and preserves
+attendance, payments and their group links. Archived groups disappear from the
+Mini App and can be reactivated in the admin. The archive action requires group
+change permission. Groups without attendance still support normal deletion.
 
 In Discounts, select a course (blank means all courses), an amount, and the minimum
 participant count, e.g. 2. Only active rules apply. The amount is deducted for each

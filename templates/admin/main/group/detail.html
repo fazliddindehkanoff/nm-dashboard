@@ -37,6 +37,13 @@
                 {% trans "O'chirish" %}
             </a>
             {% endif %}
+            {% if has_archive_permission %}
+            <a href="{{ archive_url }}"
+               class="flex items-center gap-2 border border-base-300 text-base-700 font-medium px-4 py-2 rounded-default text-sm hover:bg-base-100 dark:border-base-700 dark:text-base-300 dark:hover:bg-base-800 transition-colors">
+                <span class="material-symbols-outlined text-[18px]" aria-hidden="true">archive</span>
+                {% trans "Arxivlash" %}
+            </a>
+            {% endif %}
         </div>
     </div>
 

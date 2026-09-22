@@ -1,0 +1,23 @@
+{% extends 'unfold/layouts/base.html' %}
+{% load i18n %}
+
+{% block content %}
+<div class="mx-auto max-w-3xl px-4 py-8 flex flex-col gap-6">
+  <h1 class="text-2xl font-semibold">{% trans "Guruhlarni arxivlash" %}</h1>
+  <p>{% trans "Davomat yozuvlari bor guruhlarni butunlay o'chirish tarixni yo'qotadi. Arxivlash guruhni nofaol qiladi, davomat va to'lov yozuvlarini esa saqlaydi." %}</p>
+  <p>{% trans "Quyidagi guruhlar Mini App katalogidan olib tashlanadi. Ularni admin panelda qayta faollashtirish mumkin." %}</p>
+  <ul class="list-disc pl-6">
+    {% for group in groups %}<li>{{ group }}</li>{% endfor %}
+  </ul>
+  <form method="post" class="flex flex-wrap gap-4">
+    {% csrf_token %}
+    <input type="hidden" name="confirm_archive" value="yes">
+    {% if action_name %}
+      <input type="hidden" name="action" value="{{ action_name }}">
+      {% for group in groups %}<input type="hidden" name="_selected_action" value="{{ group.pk }}">{% endfor %}
+    {% endif %}
+    <button type="submit" class="bg-primary-600 text-white font-medium px-4 py-2 rounded-default">{% trans "Arxivlash — tarixni saqlash" %}</button>
+    <a href="{{ changelist_url }}" class="border border-base-300 dark:border-base-700 px-4 py-2 rounded-default">{% trans "Bekor qilish" %}</a>
+  </form>
+</div>
+{% endblock %}

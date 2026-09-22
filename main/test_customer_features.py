@@ -76,11 +76,17 @@ class CustomerCheckoutTests(TestCase):
         self.assertEqual(result.status_code, 201)
         self.assertEqual(result.json()['purchase']['participant_count'], 1)
 
-    def test_banner_only_on_upcoming_active_group(self):
+    def test_banner_stays_visible_on_started_active_group(self):
         self.group.banner = 'group_banners/banner.jpg'; self.group.save()
         data = self.client.get(reverse('main:telegram_app_bootstrap'), **self.headers).json()
         self.assertTrue(data['courses'][0]['active_groups'][0]['banner_url'].endswith('banner.jpg'))
         self.group.start_date = timezone.localdate(); self.group.save()
+        courses = self.client.get(reverse('main:telegram_app_bootstrap'), **self.headers).json()['courses']
+        self.assertEqual(len(courses), 1)
+        self.assertFalse(courses[0]['can_purchase'])
+        self.assertTrue(courses[0]['active_groups'][0]['banner_url'].endswith('banner.jpg'))
+        self.group.is_active = False
+        self.group.save()
         self.assertEqual(self.client.get(reverse('main:telegram_app_bootstrap'), **self.headers).json()['courses'], [])
 
     def test_banner_serves_in_production_without_exposing_other_media(self):

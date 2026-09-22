@@ -38,3 +38,12 @@
 .eligibility-fields [hidden] { display: none; }
 #paymentResultView .summary-row { text-align: left; padding: 14px 0; }
 #paymentResultView button { margin-top: 14px; }
+
+.course-groups { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 16px; }
+.course-group + .course-group { border-top: 1px solid var(--line); padding-top: 16px; }
+.course-group .course-card__schedule { margin-top: 0; }
+.course-group .course-banner { margin-bottom: 12px; }
+.course-group__teachers { grid-column: 1 / -1; }
+.course-group .course-card__schedule strong { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.course-group__status { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+.select-button:disabled { opacity: .6; cursor: default; }

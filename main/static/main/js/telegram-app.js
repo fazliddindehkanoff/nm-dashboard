@@ -205,17 +205,29 @@
     $('[data-overview-course]', host).addEventListener('click', () => openCourseDetail(featured.id));
   }
 
+  function renderCourseGroups(course) {
+    return `<ul class="course-groups" aria-label="${escapeHtml(course.name)} — faol guruhlar">${course.active_groups.map(group => `
+      <li class="course-group" data-group-id="${group.id}">
+        <p class="course-group__status">${group.can_purchase ? 'Qabul ochiq' : 'Boshlangan guruh'}</p>
+        ${group.banner_url ? `<img class="course-banner" src="${escapeHtml(group.banner_url)}" alt="${escapeHtml(course.name)} — ${formatDate(group.start_date)}" loading="lazy">` : ''}
+        <div class="course-card__schedule">
+          <span><small>Boshlanish sanasi</small><strong>${formatDate(group.start_date)}</strong></span>
+          <span><small>Davomiyligi</small><strong>${group.number_of_days} kun</strong></span>
+          <span class="course-group__teachers"><small>Ustoz</small><strong>${escapeHtml(group.teachers?.join(', ') || 'Tez orada')}</strong></span>
+        </div>
+      </li>`).join('')}</ul>`;
+  }
+
   function renderCourses() {
     $('#courseCount').textContent = `${state.courses.length} ta`;
     $('#courseList').innerHTML = state.courses.length ? state.courses.map(course => `
       <article class="course-card">
-        ${course.active_groups[0]?.banner_url ? `<img class="course-banner" src="${escapeHtml(course.active_groups[0].banner_url)}" alt="${escapeHtml(course.name)}" loading="lazy">` : ''}
         <div class="course-card__top"><span class="course-mark"><img src="/static/main/brand/norbekov-mark.svg" alt=""></span>
-          <div><span class="availability"><i></i> Faol guruh bor</span><h3>${escapeHtml(course.name)}</h3><p>${course.number_of_days || 0} kunlik rivojlanish dasturi</p></div>
+          <div><span class="availability"><i></i> ${course.active_groups.length} ta faol guruh</span><h3>${escapeHtml(course.name)}</h3><p>${course.number_of_days || 0} kunlik rivojlanish dasturi</p></div>
         </div>
-        <div class="course-card__schedule"><span><small>Eng yaqin guruh</small><strong>${formatDate(course.active_groups[0]?.start_date)}</strong></span><span><small>Ustoz</small><strong>${escapeHtml(course.active_groups[0]?.teachers?.join(', ') || 'Tez orada')}</strong></span></div>
+        ${renderCourseGroups(course)}
         <div class="course-card__bottom"><div class="price"><small>Bir kishi uchun</small><strong>${money(course.price)}</strong></div>
-          <button class="select-button" type="button" data-course-id="${course.id}">Tanlash</button></div>
+          <button class="select-button" type="button" data-course-id="${course.id}" ${course.can_purchase ? '' : 'disabled'}>${course.can_purchase ? 'Tanlash' : 'Qabul yopilgan'}</button></div>
       </article>`).join('') : '<article class="course-card"><h3>Hozircha faol guruh yo‘q</h3><p>Yangi guruh ochilganda kurs shu yerda paydo bo‘ladi.</p></article>';
     $$('[data-course-id]').forEach(button => button.addEventListener('click', () => startCheckout(Number(button.dataset.courseId))));
   }

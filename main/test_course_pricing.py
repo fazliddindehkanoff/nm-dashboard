@@ -53,7 +53,10 @@ class CourseCheckoutTests(TestCase):
                 self.group.start_date = timezone.localdate() + timedelta(days=days)
                 self.group.is_active = active
                 self.group.save()
-                self.assertEqual(self.catalogue(), [])
+                catalogue = self.catalogue()
+                self.assertEqual(len(catalogue), 1 if active else 0)
+                if catalogue:
+                    self.assertFalse(catalogue[0]['can_purchase'])
                 self.assertEqual(self.purchase().status_code, 404)
         self.assertFalse(MiniAppPurchase.objects.exists())
 
@@ -62,20 +65,22 @@ class CourseCheckoutTests(TestCase):
         self.assertEqual(len(self.catalogue()), 1)
         self.group.start_date = timezone.localdate()
         self.group.save()
-        self.assertEqual([g['id'] for g in self.catalogue()[0]['active_groups']], [future.pk])
+        self.assertEqual([g['id'] for g in self.catalogue()[0]['active_groups']], [self.group.pk, future.pk])
         self.assertEqual(self.purchase().status_code, 201)
         future.is_active = False
         future.save()
-        self.assertEqual(self.catalogue(), [])
+        self.assertFalse(self.catalogue()[0]['can_purchase'])
+        self.assertEqual([g['id'] for g in self.catalogue()[0]['active_groups']], [self.group.pk])
 
     @override_settings(TIME_ZONE='Asia/Tashkent')
-    def test_visibility_changes_at_tashkent_midnight(self):
+    def test_purchasing_closes_at_tashkent_midnight_but_active_group_stays_visible(self):
         self.group.start_date = date(2026, 9, 10)
         self.group.save()
         with patch('django.utils.timezone.now', return_value=datetime(2026, 9, 9, 18, 59, tzinfo=datetime_timezone.utc)):
             self.assertEqual(len(self.catalogue()), 1)
         with patch('django.utils.timezone.now', return_value=datetime(2026, 9, 9, 19, 0, tzinfo=datetime_timezone.utc)):
-            self.assertEqual(self.catalogue(), [])
+            self.assertEqual(len(self.catalogue()), 1)
+            self.assertFalse(self.catalogue()[0]['can_purchase'])
 
     def test_best_eligible_rule_applies_per_person_and_is_snapshotted(self):
         Discount.objects.create(name='Two people', course=self.course, amount=100000, min_participants=2)
