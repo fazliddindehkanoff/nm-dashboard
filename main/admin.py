@@ -147,6 +147,27 @@ class GroupForm(forms.ModelForm):
         return teachers
 
 
+class GroupStatusFilter(admin.SimpleListFilter):
+    title = _("Guruh holati")
+    parameter_name = 'group_status'
+
+    def lookups(self, request, model_admin):
+        return [('active', _("Faol guruhlar")), ('archived', _("Arxivlangan guruhlar")), ('all', _("Barcha guruhlar"))]
+
+    def queryset(self, request, queryset):
+        if self.value() == 'all':
+            return queryset
+        return queryset.filter(is_active=self.value() != 'archived')
+
+    def choices(self, changelist):
+        for value, label in self.lookup_choices:
+            yield {
+                'selected': (self.value() or 'active') == value,
+                'query_string': changelist.get_query_string({self.parameter_name: value}),
+                'display': label,
+            }
+
+
 @admin.register(Group)
 class GroupAdmin(ModelAdmin):
     form = GroupForm
@@ -156,7 +177,7 @@ class GroupAdmin(ModelAdmin):
     )
     list_display_links = None
     search_fields = ('course__name', 'teachers__full_name')
-    list_filter = ('is_active', 'course', 'start_date')
+    list_filter = (GroupStatusFilter, 'course', 'start_date')
     autocomplete_fields = ('teachers',)
     actions = ('archive_groups',)
 
@@ -191,7 +212,10 @@ class GroupAdmin(ModelAdmin):
                 for group in groups:
                     if group.is_active:
                         self.log_change(request, group, _("Guruh arxivlandi; davomat va to'lov tarixi saqlandi."))
-            self.message_user(request, _("%(count)s ta guruh arxivlandi. Tarix saqlandi.") % {'count': count}, messages.SUCCESS)
+            if count:
+                self.message_user(request, _("%(count)s ta guruh arxivlandi. Tarix saqlandi.") % {'count': count}, messages.SUCCESS)
+            else:
+                self.message_user(request, _("Tanlangan guruhlar allaqachon arxivlangan."), messages.INFO)
             return redirect('admin:main_group_changelist')
         return TemplateResponse(request, 'admin/main/group/archive_confirmation.html', {
             **self.admin_site.each_context(request),
@@ -466,9 +490,9 @@ class GroupAdmin(ModelAdmin):
     def get_teachers(self, obj):
         return ", ".join([t.full_name for t in obj.teachers.all()])
 
-    @display(description=_("Holati"), label={_("Faol"): "default", _("Nofaol"): "default"})
+    @display(description=_("Holati"), label={_("Faol"): "default", _("Arxivlangan"): "default"})
     def active_badge(self, obj):
-        return _("Faol") if obj.is_active else _("Nofaol")
+        return _("Faol") if obj.is_active else _("Arxivlangan")
 
 
 class QuickAddClientForm(forms.Form):

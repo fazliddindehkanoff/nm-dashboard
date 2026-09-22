@@ -48,3 +48,7 @@ They use the larger of the manual additional discount or the automatic participa
 discount, plus any booking discount. Course-specific booking amounts apply per
 person; older global booking amounts retain their per-transaction behavior.
 Top-up payments (`doplata`) do not grant the automatic participant discount again.
+
+The admin group list defaults to active groups. Use the Group status filter to
+view archived groups or all groups. Archived group detail pages show their status.
+

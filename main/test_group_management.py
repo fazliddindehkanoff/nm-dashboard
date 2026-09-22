@@ -122,3 +122,22 @@ class GroupArchiveTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.group.refresh_from_db()
         self.assertTrue(self.group.is_active)
+
+    def test_archived_groups_leave_default_list_but_remain_in_archive(self):
+        other = Group.objects.create(course=self.course, start_date=timezone.localdate())
+        self.client.post(self.delete_url, {'confirm_archive': 'yes'})
+        response = self.client.get(self.list_url)
+        self.assertEqual(list(response.context['cl'].queryset.values_list('pk', flat=True)), [other.pk])
+        response = self.client.get(self.list_url, {'group_status': 'archived'})
+        self.assertEqual(list(response.context['cl'].queryset.values_list('pk', flat=True)), [self.group.pk])
+        response = self.client.get(self.list_url, {'group_status': 'all'})
+        self.assertEqual(set(response.context['cl'].queryset.values_list('pk', flat=True)), {other.pk, self.group.pk})
+        response = self.client.get(reverse('admin:main_group_detail', args=[self.group.pk]))
+        self.assertContains(response, 'Bu guruh arxivlangan.')
+
+    def test_already_archived_group_has_clear_message(self):
+        self.group.is_active = False
+        self.group.save()
+        response = self.client.post(self.delete_url, {'confirm_archive': 'yes'}, follow=True)
+        self.assertContains(response, 'Tanlangan guruhlar allaqachon arxivlangan.')
+        self.assert_history_kept()
