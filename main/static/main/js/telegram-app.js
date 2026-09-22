@@ -205,31 +205,20 @@
     $('[data-overview-course]', host).addEventListener('click', () => openCourseDetail(featured.id));
   }
 
-  function renderCourseGroups(course) {
-    return `<ul class="course-groups" aria-label="${escapeHtml(course.name)} — faol guruhlar">${course.active_groups.map(group => `
-      <li class="course-group" data-group-id="${group.id}">
-        <p class="course-group__status">${group.can_purchase ? 'Qabul ochiq' : 'Boshlangan guruh'}</p>
-        ${group.banner_url ? `<img class="course-banner" src="${escapeHtml(group.banner_url)}" alt="${escapeHtml(course.name)} — ${formatDate(group.start_date)}" loading="lazy">` : ''}
-        <div class="course-card__schedule">
-          <span><small>Boshlanish sanasi</small><strong>${formatDate(group.start_date)}</strong></span>
-          <span><small>Davomiyligi</small><strong>${group.number_of_days} kun</strong></span>
-          <span class="course-group__teachers"><small>Ustoz</small><strong>${escapeHtml(group.teachers?.join(', ') || 'Tez orada')}</strong></span>
-        </div>
-      </li>`).join('')}</ul>`;
-  }
-
   function renderCourses() {
-    $('#courseCount').textContent = `${state.courses.length} ta`;
-    $('#courseList').innerHTML = state.courses.length ? state.courses.map(course => `
-      <article class="course-card">
-        <div class="course-card__top"><span class="course-mark"><img src="/static/main/brand/norbekov-mark.svg" alt=""></span>
-          <div><span class="availability"><i></i> ${course.active_groups.length} ta faol guruh</span><h3>${escapeHtml(course.name)}</h3><p>${course.number_of_days || 0} kunlik rivojlanish dasturi</p></div>
-        </div>
-        ${renderCourseGroups(course)}
-        <div class="course-card__bottom"><div class="price"><small>Bir kishi uchun</small><strong>${money(course.price)}</strong></div>
-          <button class="select-button" type="button" data-course-id="${course.id}" ${course.can_purchase ? '' : 'disabled'}>${course.can_purchase ? 'Tanlash' : 'Qabul yopilgan'}</button></div>
-      </article>`).join('') : '<article class="course-card"><h3>Hozircha faol guruh yo‘q</h3><p>Yangi guruh ochilganda kurs shu yerda paydo bo‘ladi.</p></article>';
-    $$('[data-course-id]').forEach(button => button.addEventListener('click', () => startCheckout(Number(button.dataset.courseId))));
+    const groups = state.courses.flatMap(course => course.active_groups.map(group => ({ ...group, course })))
+      .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.id - b.id);
+    $('#courseCount').textContent = `${groups.length} ta guruh`;
+    $('#courseList').innerHTML = groups.length ? `
+      <div class="group-schedule__head" aria-hidden="true"><span>O‘qituvchi</span><span>Mashg‘ulot</span><span>Boshlanish</span><span>Bir kishi uchun</span></div>
+      <ul class="group-schedule__list" aria-label="Faol guruhlar jadvali">${groups.map(group => `
+        <li class="schedule-row" data-group-id="${group.id}">
+          <div class="schedule-row__teacher"><small>O‘qituvchi</small><strong>${escapeHtml(group.teachers?.join(', ') || 'Tez orada e’lon qilinadi')}</strong></div>
+          <div class="schedule-row__course"><small>Mashg‘ulot</small><h3>${escapeHtml(group.course.name)}</h3><span class="schedule-row__status ${group.can_purchase ? 'is-open' : ''}">${group.can_purchase ? 'Qabul ochiq' : 'Boshlangan'}</span></div>
+          <div class="schedule-row__date"><small>Boshlanish</small><time datetime="${group.start_date}">${formatDate(group.start_date)}</time><span>${group.number_of_days} kunlik dars</span></div>
+          <div class="schedule-row__payment"><small>Bir kishi uchun</small><strong>${money(group.course.price)}</strong><button class="schedule-row__button" type="button" data-course-id="${group.course.id}" ${group.can_purchase ? '' : 'disabled'} aria-label="${escapeHtml(group.course.name)} — ${formatDate(group.start_date)}: kursga yozilish">${group.can_purchase ? 'Kursga yozilish ↗' : 'Qabul yopilgan'}</button></div>
+        </li>`).join('')}</ul>` : '<div class="schedule-empty"><h3>Hozircha faol guruh yo‘q</h3><p>Yangi guruh ochilganda jadval shu yerda paydo bo‘ladi.</p></div>';
+    $$('[data-course-id]', $('#courseList')).forEach(button => button.addEventListener('click', () => startCheckout(Number(button.dataset.courseId))));
   }
 
   function renderMyCourses() {

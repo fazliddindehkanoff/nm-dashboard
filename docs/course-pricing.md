@@ -17,7 +17,9 @@ special family price is intended. The later social concession and its different
 booking amount are not automatically imported or inferred from participant count.
 
 The Mini App catalog lists every active group, including groups that have already
-started. Each group shows its own start date, duration, teachers and banner.
+started. Each group appears as a separate timetable row, ordered by start date, with its
+own course name, teachers, start date, duration and price. The timetable does not
+nest groups under course cards.
 New purchases still require an active group whose start date is strictly after
 today in Asia/Tashkent; courses with only started groups show closed enrollment.
 Existing purchases and attendance remain accessible.
