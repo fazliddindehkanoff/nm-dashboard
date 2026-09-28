@@ -158,6 +158,7 @@ USE_I18N = True
 
 # Uzbek wording for Django admin and Unfold strings that ship untranslated.
 LOCALE_PATHS = [BASE_DIR / 'locale']
+FORMAT_MODULE_PATH = ['core.formats']
 
 USE_TZ = True
 
@@ -248,6 +249,7 @@ def _asset_version(relative_path):
 
 
 _ADMIN_EXTRA_CSS_VERSION = _asset_version("main/static/main/css/admin-extra.css")
+_ADMIN_EXTRA_JS_VERSION = _asset_version("main/static/main/js/admin-extra.js")
 
 UNFOLD = {
     "SITE_TITLE": "Norbekov Markazi",
@@ -265,6 +267,7 @@ UNFOLD = {
     # Utilities the custom admin templates use but Unfold does not ship; the
     # content hash busts the long-lived static cache after each change.
     "STYLES": [lambda request: f"/static/main/css/admin-extra.css?v={_ADMIN_EXTRA_CSS_VERSION}"],
+    "SCRIPTS": [lambda request: f"/static/main/js/admin-extra.js?v={_ADMIN_EXTRA_JS_VERSION}"],
     # DIQQAT: unfold 0.67 bu qiymatlarni to'g'ridan-to'g'ri `var(--color-primary-600)`
     # ichiga qo'yadi va CSS rangi sifatida ishlatadi. Shuning uchun ular haqiqiy CSS
     # rangi bo'lishi shart — "82 82 82" ko'rinishidagi RGB triplet brauzer tomonidan

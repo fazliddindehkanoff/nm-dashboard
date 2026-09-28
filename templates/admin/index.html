@@ -72,7 +72,7 @@
     <div class="flex flex-col gap-6">
         <!-- ===== Quick Actions ===== -->
         {% if not is_owner_view %}
-        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4" aria-label="Tezkor amallar">
+        <div class="grid grid-cols-2 xl:grid-cols-6 gap-4" aria-label="Tezkor amallar">
             {% if perms.main.add_transaction %}
             <a href="/admin/main/transaction/add/" aria-label="Yangi to'lov yaratish" title="Yangi to'lov yaratish" class="bg-white flex items-center gap-3 overflow-hidden p-4 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 hover:border-base-400 transition-colors">
                 <span class="material-symbols-outlined text-base-500" aria-hidden="true">add_card</span>
@@ -87,7 +87,7 @@
             {% endif %}
             <a href="/admin/main/transaction/?is_confirmed__exact=0" aria-label="Tasdiqlanmagan to'lovlarni ochish" title="Tasdiqlanmagan to'lovlar" class="bg-white flex items-center gap-3 overflow-hidden p-4 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 hover:border-base-400 transition-colors">
                 <span class="material-symbols-outlined text-base-500" aria-hidden="true">pending_actions</span>
-                <span class="font-medium text-sm text-font-important-light dark:text-font-important-dark">Tasdiqlanmagan to'lovlar</span>
+                <span class="font-medium text-sm text-font-important-light dark:text-font-important-dark">Tasdiq kutilmoqda</span>
                 <span class="ml-auto bg-base-100 dark:bg-base-800 text-base-600 dark:text-base-300 px-2 py-0.5 rounded-full text-xs">{{ pending_count|default:"0" }}</span>
             </a>
             <a href="/qr-verify/" aria-label="QR tekshirish sahifasini ochish" title="QR tekshirish" class="bg-white flex items-center gap-3 overflow-hidden p-4 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 hover:border-base-400 transition-colors">
@@ -109,7 +109,7 @@
 
 
         <!-- ===== KPI Cards ===== -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="kpi-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             <!-- Income -->
             <div class="bg-white flex items-center gap-4 overflow-hidden p-6 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
                 <span class="flex items-center justify-center w-12 h-12 rounded-full shrink-0 bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300">
@@ -190,6 +190,68 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- ===== Bugungi ishlar ===== -->
+        <div class="flex flex-col gap-6 lg:flex-row">
+            {% if not is_owner_view %}
+            <section class="bg-white flex flex-col overflow-hidden rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 lg:w-1/2">
+                <div class="border-b border-base-200 flex items-center gap-2 py-4 px-6 dark:border-base-800">
+                    <span class="material-symbols-outlined text-xl" style="color: #d97706;" aria-hidden="true">pending_actions</span>
+                    <h2 class="font-semibold text-important" style="font-size: 15px;">Tasdiq kutayotgan to'lovlar</h2>
+                    <span class="ml-auto rounded-full px-2 text-xs font-semibold" style="background: #fef3c7; color: #92400e;">{{ pending_count }}</span>
+                </div>
+                <ul class="grow">
+                    {% for t in pending_transactions %}
+                    <li class="border-b border-base-200 dark:border-base-800 last:border-b-0">
+                        <a href="{% url 'admin:main_transaction_change' t.pk %}" class="flex items-center gap-3 px-6 py-3 hover:bg-base-50 dark:hover:bg-base-800">
+                            <div class="min-w-0 grow">
+                                <div class="font-medium text-sm text-font-important-light dark:text-font-important-dark truncate">{% for c in t.clients.all %}{{ c.full_name }}{% if not forloop.last %}, {% endif %}{% empty %}To'lov #{{ t.pk }}{% endfor %}</div>
+                                <div class="text-xs text-base-500 truncate">{% if t.group %}{{ t.group.course.name }} · {% endif %}{{ t.date|date:"d.m.Y" }}{% if t.operator %} · {{ t.operator.full_name }}{% endif %}</div>
+                            </div>
+                            <strong class="text-sm whitespace-nowrap text-font-important-light dark:text-font-important-dark">{{ t.amount|money }} UZS</strong>
+                            <span class="material-symbols-outlined text-base-400" style="font-size: 18px;" aria-hidden="true">chevron_right</span>
+                        </a>
+                    </li>
+                    {% empty %}
+                    <li class="px-6 py-8 text-center text-sm text-base-500">
+                        <span class="material-symbols-outlined" style="font-size: 28px; color: #16a34a;" aria-hidden="true">task_alt</span>
+                        <p class="mt-1 mb-0">Hamma to'lovlar tasdiqlangan.</p>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% if pending_count > pending_transactions|length %}
+                <a href="/payments/?status=pending" class="border-t border-base-200 dark:border-base-800 px-6 py-3 text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline">Hammasini ko'rish ({{ pending_count }}) →</a>
+                {% endif %}
+            </section>
+            {% endif %}
+
+            <section class="bg-white flex flex-col overflow-hidden rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200 {% if is_owner_view %}w-full{% else %}lg:w-1/2{% endif %}">
+                <div class="border-b border-base-200 flex items-center gap-2 py-4 px-6 dark:border-base-800">
+                    <span class="material-symbols-outlined text-base-500 text-xl" aria-hidden="true">event_upcoming</span>
+                    <h2 class="font-semibold text-important" style="font-size: 15px;">Yaqin 14 kunda boshlanadigan guruhlar</h2>
+                </div>
+                <ul class="grow">
+                    {% for g in upcoming_groups %}
+                    <li class="border-b border-base-200 dark:border-base-800 last:border-b-0">
+                        <a href="{% url 'admin:main_group_detail' g.pk %}" class="flex items-center gap-4 px-6 py-3 hover:bg-base-50 dark:hover:bg-base-800">
+                            <span class="flex flex-col items-center justify-center rounded-default bg-base-100 dark:bg-base-800 shrink-0" style="width: 48px; height: 48px;">
+                                <strong class="text-base leading-none text-font-important-light dark:text-font-important-dark">{{ g.start_date|date:"d" }}</strong>
+                                <span class="text-base-500" style="font-size: 11px;">{{ g.start_date|date:"m.Y" }}</span>
+                            </span>
+                            <div class="min-w-0 grow">
+                                <div class="font-medium text-sm text-font-important-light dark:text-font-important-dark truncate">{{ g.course.name }}</div>
+                                <div class="text-xs text-base-500 truncate">{% for teacher in g.teachers.all %}{{ teacher.full_name }}{% if not forloop.last %}, {% endif %}{% empty %}O'qituvchi biriktirilmagan{% endfor %}</div>
+                            </div>
+                            <span class="rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap {% if g.participants %}{% else %}bg-base-100 text-base-500 dark:bg-base-800{% endif %}" {% if g.participants %}style="background: #e0f7f9; color: #0b6f7c;"{% endif %}>{{ g.participants }} kishi</span>
+                        </a>
+                    </li>
+                    {% empty %}
+                    <li class="px-6 py-8 text-center text-sm text-base-500">Yaqin 14 kunda boshlanadigan guruh yo'q.</li>
+                    {% endfor %}
+                </ul>
+                <a href="{% url 'admin:main_group_changelist' %}" class="border-t border-base-200 dark:border-base-800 px-6 py-3 text-sm font-medium text-primary-600 dark:text-primary-400 hover:underline">Barcha guruhlar →</a>
+            </section>
         </div>
 
         <!-- ===== Grafiklar ===== -->

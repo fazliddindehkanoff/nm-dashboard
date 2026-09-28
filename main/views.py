@@ -125,6 +125,22 @@ def build_statistics(transactions):
     }
 
 
+def _upcoming_groups(days=14, limit=8):
+    """Active groups starting soon, with how many clients have paid."""
+    from django.db.models import Q
+    from django.utils import timezone
+
+    today = timezone.localdate()
+    return list(
+        Group.objects.filter(is_active=True, start_date__gte=today, start_date__lte=today + timedelta(days=days))
+        .select_related('course').prefetch_related('teachers')
+        .annotate(participants=Count(
+            'transaction__participants__client', filter=Q(transaction__is_refunded=False), distinct=True,
+        ))
+        .order_by('start_date', 'course__name')[:limit]
+    )
+
+
 def dashboard_callback(request, context):
     month_filter = request.GET.get('month')
     operator_filter = request.GET.get('operator_id')
@@ -205,6 +221,12 @@ def dashboard_callback(request, context):
             total=Sum('debt')
         )['total'] or 0,
         "recent_transactions": all_transactions.prefetch_related('clients').select_related('group__course').order_by('-date', '-id')[:6],
+        # Work waiting for staff: the oldest unconfirmed payments first.
+        "pending_transactions": (
+            pending_transactions.prefetch_related('clients').select_related('group__course', 'operator')
+            .order_by('date', 'id')[:6]
+        ),
+        "upcoming_groups": _upcoming_groups(),
         "operators": (
             Operator.objects.filter(role=RoleConfiguration.ROLE_OPERATOR)
             if not is_plain_op else Operator.objects.filter(id=request.user.operator.id)

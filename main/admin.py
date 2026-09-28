@@ -8,6 +8,7 @@ from django.apps import apps
 from django.db import models, transaction as db_transaction
 from django.contrib import admin, messages
 from django.contrib.admin.actions import delete_selected
+from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
 from django.contrib.auth.models import User, Permission
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect
@@ -1098,8 +1099,14 @@ class TransactionForm(forms.ModelForm):
 class TransactionClientInlineForm(forms.ModelForm):
     """Tranzaksiyaga biriktirilgan bitta mijoz qatori (ism/telefon orqali)."""
 
-    client_name = forms.CharField(label=_("Mijoz ismi"), max_length=255, widget=UnfoldAdminTextInputWidget())
-    client_phone = forms.CharField(label=_("Telefon raqami"), max_length=20, widget=UnfoldAdminTextInputWidget())
+    client_name = forms.CharField(
+        label=_("Mijoz ismi"), max_length=255,
+        widget=UnfoldAdminTextInputWidget(attrs={'placeholder': _("Familiya Ism")}),
+    )
+    client_phone = forms.CharField(
+        label=_("Telefon raqami"), max_length=20,
+        widget=UnfoldAdminTextInputWidget(attrs={'placeholder': '+998 90 123 45 67', 'inputmode': 'tel'}),
+    )
 
     class Meta:
         model = TransactionClient
@@ -1116,12 +1123,20 @@ class TransactionClientInline(TabularInline):
     model = TransactionClient
     form = TransactionClientInlineForm
     fk_name = 'transaction'
-    extra = 1
+    extra = 0
     min_num = 1
     validate_min = True
     can_delete = True
+    verbose_name = _("Mijoz")
+    verbose_name_plural = _("Mijozlar (to'lov kimlar uchun)")
     readonly_fields = ('share_amount', 'share_discount', 'debt')
     fields = ('client_name', 'client_phone', 'share_amount', 'share_discount', 'debt')
+
+    def get_fields(self, request, obj=None):
+        # Shares and debt only exist after the payment is saved.
+        if obj is None:
+            return ('client_name', 'client_phone')
+        return super().get_fields(request, obj)
 
     def get_formset(self, request, obj=None, **kwargs):
         BaseFormSet = super().get_formset(request, obj, **kwargs)
@@ -1447,15 +1462,20 @@ class TransactionAdmin(ModelAdmin):
             return columns + ('review_actions',)
         return columns
 
+    # Related fields share a row so the whole payment fits on one screen.
     fieldsets = (
-        (None, {
+        (_("Guruh"), {
+            'fields': (('group', 'operator'),),
+        }),
+        (_("To'lov"), {
             'fields': (
-                'operator', 'group', 'date', 'amount', 'payment_type', 'payment_method',
-                'discount', 'screenshot',
+                ('amount', 'date'),
+                ('payment_type', 'payment_method'),
+                ('discount', 'screenshot'),
             ),
         }),
         (_("Tasdiqlash / qaytarish"), {
-            'fields': ('is_confirmed', 'confirmed_at', 'confirmed_by', 'is_refunded', 'refunded_at'),
+            'fields': (('is_confirmed', 'confirmed_at', 'confirmed_by'), ('is_refunded', 'refunded_at')),
         }),
     )
 
@@ -1467,14 +1487,40 @@ class TransactionAdmin(ModelAdmin):
 
     def get_fieldsets(self, request, obj=None):
         fieldsets = super().get_fieldsets(request, obj)
+        if obj is None:
+            # A new payment has nothing to confirm or refund yet.
+            fieldsets = [item for item in fieldsets if item[0] != _("Tasdiqlash / qaytarish")]
         if not _is_plain_operator(request):
             return fieldsets
         # Operator uchun 'operator' maydonini fieldsetsdan olib tashlaymiz.
         cleaned = []
         for name, opts in fieldsets:
-            fields = tuple(f for f in opts.get('fields', ()) if f != 'operator')
-            cleaned.append((name, {**opts, 'fields': fields}))
+            fields = []
+            for line in opts.get('fields', ()):
+                if isinstance(line, (list, tuple)):
+                    line = tuple(f for f in line if f != 'operator')
+                    if line:
+                        fields.append(line if len(line) > 1 else line[0])
+                elif line != 'operator':
+                    fields.append(line)
+            cleaned.append((name, {**opts, 'fields': tuple(fields)}))
         return cleaned
+
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        initial.setdefault('date', timezone.localdate())
+        return initial
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        field = super().formfield_for_dbfield(db_field, request, **kwargs)
+        # Groups, operators and discounts are managed on their own pages; the
+        # payment form keeps only the dropdown.
+        if field is not None and isinstance(field.widget, RelatedFieldWidgetWrapper):
+            field.widget.can_add_related = False
+            field.widget.can_change_related = False
+            field.widget.can_delete_related = False
+            field.widget.can_view_related = False
+        return field
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
@@ -1571,9 +1617,18 @@ class TransactionAdmin(ModelAdmin):
         )
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        # Yangi to'lovlarda faqat faol guruhlar ko'rsatiladi.
+        # Yangi to'lovlarda faqat faol guruhlar, boshlanish sanasi bo'yicha.
         if db_field.name == 'group':
-            kwargs['queryset'] = Group.objects.filter(is_active=True).select_related('course')
+            kwargs['queryset'] = (
+                Group.objects.filter(is_active=True).select_related('course')
+                .prefetch_related('teachers').order_by('start_date', 'course__name')
+            )
+            field = super().formfield_for_foreignkey(db_field, request, **kwargs)
+            field.label_from_instance = lambda group: " · ".join(filter(None, (
+                group.start_date.strftime('%d.%m.%Y'), group.course.name,
+                ", ".join(teacher.full_name for teacher in group.teachers.all()),
+            )))
+            return field
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     # ---- Pul qabul qilish (admin va operatorlar, mavjud to'lovga summa qo'shadi) ----

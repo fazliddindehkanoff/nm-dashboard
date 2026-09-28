@@ -84,7 +84,7 @@
             <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Holati" %}</p>
             <div>
                 {% if group.is_active %}
-                <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Faol" %}</span>
+                <span class="font-medium px-2 py-0.5 rounded-default text-xs" style="background: #dcfce7; color: #166534;">{% trans "Faol" %}</span>
                 {% else %}
                 <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Nofaol" %}</span>
                 {% endif %}
@@ -161,11 +161,11 @@
                         <td class="py-3 px-6">{{ tx.get_payment_type_display }}</td>
                         <td class="py-3 px-6">
                             {% if tx.is_refunded %}
-                            <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Qaytarilgan" %}</span>
+                            <span class="font-medium px-2 py-0.5 rounded-default text-xs whitespace-nowrap" style="background: #fee2e2; color: #991b1b;">{% trans "Qaytarilgan" %}</span>
                             {% elif tx.is_confirmed %}
-                            <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Tasdiqlangan" %}</span>
+                            <span class="font-medium px-2 py-0.5 rounded-default text-xs whitespace-nowrap" style="background: #dcfce7; color: #166534;">{% trans "Tasdiqlangan" %}</span>
                             {% else %}
-                            <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Kutilmoqda" %}</span>
+                            <span class="font-medium px-2 py-0.5 rounded-default text-xs whitespace-nowrap" style="background: #fef3c7; color: #92400e;">{% trans "Kutilmoqda" %}</span>
                             {% endif %}
                         </td>
                         <td class="py-3 px-6 text-right text-base-500">{{ tx.date|date:"d.m.Y" }}</td>
