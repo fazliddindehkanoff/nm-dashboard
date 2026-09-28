@@ -305,7 +305,7 @@
       const label = done ? 'Tayyor' : paid ? 'Anketa kutilmoqda' : item.payment_status_label;
       const contractLink = item.contract_accepted ? `<button type="button" class="continue-button" data-view-contract="${item.id}">Shartnomani ko‘rish</button>` : '';
       const returnLink = item.can_return_to_cart ? `<button type="button" class="text-button" data-return-to-cart="${item.id}">Savatga qaytarish</button>` : '';
-      return `<article class="purchase-card"><div class="purchase-card__head"><div><h3>${escapeHtml(item.course)}</h3><p>${item.group ? `${formatDate(item.group.start_date)} · ` : ''}${item.participant_count} ishtirokchi · ${money(item.total_amount)}</p>${item.is_booking ? `<p>To‘langan: ${money(item.paid_amount)} · Qolgan: ${money(item.payable_amount)}</p>` : ''}</div><span class="status status--${done ? 'success' : 'pending'}">${label}</span></div><div class="purchase-card__actions">${done ? contractLink : `<button type="button" class="continue-button" data-resume="${item.id}">${paid ? 'Anketani to‘ldirish →' : 'To‘lash →'}</button>${contractLink}`}${returnLink}</div></article>`;
+      return `<article class="purchase-card"><div class="purchase-card__head"><div><h3>${escapeHtml(item.course)}</h3><p>${item.group ? `${formatDate(item.group.start_date)} · ` : ''}${item.participant_count} ishtirokchi · ${money(item.sale_amount)}</p>${item.is_booking ? `<p>To‘langan: ${money(item.paid_amount)} · Qolgan: ${money(item.payable_amount)}</p>` : ''}</div><span class="status status--${done ? 'success' : 'pending'}">${label}</span></div><div class="purchase-card__actions">${done ? contractLink : `<button type="button" class="continue-button" data-resume="${item.id}">${paid ? 'Anketani to‘ldirish →' : 'To‘lash →'}</button>${contractLink}`}${returnLink}</div></article>`;
     }).join('')}` : '';
     ['#purchaseHistory', '#cartOrders'].forEach(selector => {
       const host = $(selector);
@@ -552,11 +552,11 @@
       const ready = item.status === 'ready';
       const selected = ready && state.cartSelection.has(item.id);
       const family = item.members.map(member => escapeHtml(member.full_name.split(' ')[0])).join(', ');
-      const discounts = Number(item.discount_total) + Number(item.social_discount_amount);
+      const discounts = Number(item.discount_total) + Number(item.social_discount_amount) + Number(item.booking_discount);
       return `<article class="cart-item${selected ? ' is-selected' : ''}${ready ? '' : ' is-blocked'}">
         <label class="cart-check"><input type="checkbox" data-cart-select="${item.id}" ${selected ? 'checked' : ''} ${ready ? '' : 'disabled'} aria-label="${escapeHtml(item.course)} kursini tanlash"><span aria-hidden="true"></span></label>
         <div class="cart-item__body">
-          <div class="cart-item__top"><h3>${escapeHtml(item.course)}</h3><strong>${money(item.total_amount)}</strong></div>
+          <div class="cart-item__top"><h3>${escapeHtml(item.course)}</h3><strong>${money(item.sale_amount)}</strong></div>
           <p class="cart-item__meta">${item.group ? `${formatDate(item.group.start_date)} · ${item.group.number_of_days} kun${item.group.teachers.length ? ` · ${escapeHtml(item.group.teachers.join(', '))}` : ''}` : 'Guruh tanlanmagan'}</p>
           <div class="cart-item__chips"><span>${item.participant_count} kishi</span><span>${escapeHtml(item.purchase_type_label)}${family ? `: siz, ${family}` : ''}</span><span>${escapeHtml(item.payment_mode_label)}</span>${discounts > 0 ? `<span class="chip--discount">−${money(discounts)}</span>` : ''}</div>
           ${item.status_message ? `<p class="cart-item__warning">${escapeHtml(item.status_message)}</p>` : ''}
@@ -580,8 +580,8 @@
   function renderCartSummary() {
     const selected = selectedCartItems();
     const ready = state.cart.filter(item => item.status === 'ready');
-    const total = selected.reduce((sum, item) => sum + Number(item.total_amount), 0);
-    const discount = selected.reduce((sum, item) => sum + Number(item.discount_total) + Number(item.social_discount_amount), 0);
+    const total = selected.reduce((sum, item) => sum + Number(item.sale_amount), 0);
+    const discount = selected.reduce((sum, item) => sum + Number(item.discount_total) + Number(item.social_discount_amount) + Number(item.booking_discount), 0);
     const selectAll = $('#selectAllCart');
     selectAll.checked = Boolean(ready.length) && selected.length === ready.length;
     selectAll.indeterminate = Boolean(selected.length) && selected.length < ready.length;

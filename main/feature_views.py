@@ -21,7 +21,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
-from .models import (EligibilityDocument, Operator, Transaction, SubTransaction,
+from .models import (EligibilityDocument, MiniAppPurchase, Operator, Transaction, SubTransaction,
                      MulticardInvoice, PAYMENT_METHODS)
 from .permissions import is_operator, permission_required
 
@@ -103,9 +103,12 @@ def referrals(request):
     rows = []
     for operator in operators:
         invoices = MulticardInvoice.objects.filter(purchase__referrer=operator, state='success').exclude(store_id='demo')
+        # A sale is valued at the price the customer pays after all discounts.
+        sold = MiniAppPurchase.objects.filter(pk__in=invoices.values('purchase_id'))
         rows.append({'name': operator.full_name, 'link': referral_link(operator),
                      'registrations': operator.referral_accounts.filter(onboarding_step='ready').count(),
-                     'sales': invoices.values('purchase_id').distinct().count(),
+                     'sales': sold.count(),
+                     'sales_amount': sum((purchase.sale_amount for purchase in sold), Decimal(0)),
                      'paid': Decimal(invoices.aggregate(total=Sum('amount'))['total'] or 0) / 100})
     return render(request, 'admin/main/referrals.html', {**admin.site.each_context(request), 'title': 'Referal havolalar', 'rows': rows})
 

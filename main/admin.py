@@ -2518,7 +2518,7 @@ class MiniAppPurchaseAdmin(ModelAdmin):
     form = MiniAppPurchaseAdminForm
     list_display = (
         'telegram_user', 'course', 'group', 'purchase_type', 'participant_count',
-        'total_amount', 'discount_amount', 'paid_amount', 'balance', 'contract_status', 'payment_status',
+        'sale_amount_display', 'paid_amount', 'balance', 'contract_status', 'payment_status',
         'group_payment_link', 'questionnaire_completed', 'created_at',
     )
     list_filter = (
@@ -2530,7 +2530,7 @@ class MiniAppPurchaseAdmin(ModelAdmin):
         'members__full_name', 'members__phone_number', 'payment_reference',
     )
     readonly_fields = ('referrer', 'social_discount_amount', 'uuid', 'discount_name', 'discount_per_person', 'created_at', 'updated_at', 'paid_at', 'booking_discount',
-                       'discount_amount', 'paid_amount', 'balance', 'group_payment_link')
+                       'discount_amount', 'sale_amount_display', 'paid_amount', 'balance', 'group_payment_link')
     autocomplete_fields = ('telegram_user', 'course')
     inlines = (MiniAppPurchaseMemberInline, MulticardInvoiceInline,)
 
@@ -2573,6 +2573,10 @@ class MiniAppPurchaseAdmin(ModelAdmin):
     @display(description=_("Qolgan qarz"))
     def balance(self, obj):
         return obj.remaining_amount
+
+    @display(description=_("Sotuv summasi (chegirmalardan keyin)"))
+    def sale_amount_display(self, obj):
+        return obj.sale_amount
 
     @display(description=_("Shartnoma"), boolean=True)
     def contract_status(self, obj):

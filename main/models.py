@@ -1113,6 +1113,12 @@ class MiniAppPurchase(models.Model):
         self.save(update_fields=('discount_amount', 'paid_amount', 'payment_status', 'payment_reference', 'paid_at', 'updated_at'))
 
     @property
+    def sale_amount(self):
+        """Sale value after every discount, including the agreed booking discount."""
+        discount = self.booking_discount if self.is_booking else self.discount_amount
+        return max(self.total_amount - discount, Decimal(0))
+
+    @property
     def remaining_amount(self):
         return max(self.total_amount - self.discount_amount - self.paid_amount, Decimal(0))
 

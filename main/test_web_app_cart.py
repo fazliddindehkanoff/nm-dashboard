@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .models import (
-    AttendanceRecord, Client, Course, Discount, Group, LegalAcceptance, MiniAppCartItem, MiniAppPurchase,
+    AttendanceRecord, Client, Course, Discount, Group, LegalAcceptance, MiniAppCartItem, MiniAppPurchase, Operator,
     TelegramUser, Transaction, TransactionClient,
 )
 from .services.legal import BOOKING_CONTRACT_VERSION, CONTRACT_VERSION, TERMS_VERSION
@@ -253,6 +253,21 @@ class WebAppGroupPaymentTests(TestCase):
         self.purchase.refresh_from_db()
         self.assertEqual(self.purchase.paid_amount, 200000)
         self.assertFalse(Transaction.objects.filter(mini_app_purchase=self.purchase).exists())
+
+    def test_referral_sale_is_valued_after_all_discounts(self):
+        seller_user = User.objects.create_user(username='seller')
+        seller = Operator.objects.create(user=seller_user, full_name='Seller', role='operator')
+        MiniAppPurchase.objects.filter(pk=self.purchase.pk).update(referrer=seller)
+        self.purchase.refresh_from_db()
+        # 3,000,000 after family/social discounts, minus the 400,000 booking discount.
+        self.assertEqual(self.purchase.sale_amount, 2600000)
+        self.pay('200000')
+        self.client.force_login(User.objects.create_superuser(username='referral-admin'))
+        row = next(row for row in self.client.get(reverse('main:referrals')).context['rows'] if row['name'] == 'Seller')
+        self.assertEqual((row['sales'], row['sales_amount'], row['paid']), (1, Decimal('2600000'), Decimal('200000')))
+        listing = self.client.get(reverse('admin:main_miniapppurchase_changelist'))
+        self.assertContains(listing, 'Sotuv summasi')
+        self.assertContains(listing, '2600000')
 
     def test_payments_page_lists_a_web_app_payment_once(self):
         self.pay('200000')
