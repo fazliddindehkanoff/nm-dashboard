@@ -6,6 +6,25 @@ A signed success callback commits the payment and links each participant to a CR
 client. The questionnaire remains locked until payment is confirmed. Purchases
 and references are visible under **Mini App xaridlari** in the admin.
 
+## Cart and group payments
+
+Courses are added to a cart with a chosen upcoming group, participants, social
+discount documents and payment mode. Cart items never expire. If the chosen group
+starts, the item asks for a new group; if a course has no upcoming group, it stays
+saved. Checkout of any selected items creates one purchase per course with a shared
+batch. Their contracts are shown together and accepted once, with a separate audit
+record per course. The courses are then paid one after another, each through the
+installment flow below. An unpaid purchase can be returned to the cart unless its
+invoice is being created or needs reconciliation.
+
+Every settled installment or refund updates one confirmed CRM payment
+(`source=telegram_app`, method Rahmat) in the purchase's group. The group's
+payments, participant count, attendance and debt therefore match the web app
+balance. The unified payments page lists these payments from their invoices only,
+so they are not counted twice. Purchases made before group selection have no
+group. The group page warns about them, and staff attach a group from the purchase
+admin page.
+
 ## Booking and installments
 
 New checkouts offer booking or the existing full-payment flow. The minimum per

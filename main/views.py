@@ -470,7 +470,10 @@ def qr_verify(request):
         'invalid_code': invalid_code,
         'client': client,
         'transactions': transactions,
-        'online_enrollments': client.mini_app_enrollments.select_related('purchase__course').filter(purchase__payment_status__in=('partial', 'success')) if client else [],
+        # Purchases already written to a group appear among the CRM payments above.
+        'online_enrollments': client.mini_app_enrollments.select_related('purchase__course').filter(
+            purchase__payment_status__in=('partial', 'success'), purchase__group_payment__isnull=True,
+        ) if client else [],
         'summary': summary,
         'is_plain_operator': is_plain_op,
     }

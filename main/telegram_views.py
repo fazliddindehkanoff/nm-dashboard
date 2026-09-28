@@ -1,7 +1,6 @@
 import hashlib
 import json
 import logging
-import re
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -17,17 +16,14 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from .models import (
-    EligibilityDocument,
     AttendanceLesson,
     AttendanceRecord,
-    Client,
     Course,
     Discount,
     EnrollmentQuestionnaire,
     Group,
     LegalAcceptance,
     MiniAppPurchase,
-    MiniAppPurchaseMember,
     MulticardInvoice,
     Operator,
     PaymentSettings,
@@ -42,6 +38,19 @@ from .services.legal import (
     render_contract_document,
     render_terms_document,
     terms_accepted,
+)
+from .services.mini_app import (
+    CheckoutError,
+    build_participants,
+    can_return_to_cart,
+    checkout_cart,
+    create_purchase,
+    find_client_by_phone as _find_client_by_phone,
+    normalise_phone as _normalise_phone,
+    quote,
+    return_to_cart,
+    save_cart_item,
+    upcoming_groups_by_course,
 )
 from .services.telegram import TelegramNotConfigured, send_bot_message
 from .services.telegram_auth import TelegramAuthenticationError, telegram_user_from_request
@@ -68,37 +77,6 @@ def _telegram_asset_version():
     ):
         digest.update((settings.BASE_DIR / relative_path).read_bytes())
     return digest.hexdigest()[:12]
-
-
-def _digits(value):
-    return re.sub(r'\D', '', value or '')
-
-
-def _normalise_phone(value):
-    digits = _digits(value)
-    if len(digits) == 9:
-        digits = '998' + digits
-    if len(digits) != 12 or not digits.startswith('998'):
-        raise ValueError("Telefon raqamini +998 XX XXX XX XX ko'rinishida kiriting.")
-    return '+' + digits
-
-
-def _find_client_by_phone(phone):
-    target = _digits(phone)
-    for client in Client.objects.only('id', 'phone_number', 'full_name'):
-        if _digits(client.phone_number) == target:
-            return client
-    return None
-
-
-def _get_or_create_client(full_name, phone):
-    client = _find_client_by_phone(phone)
-    if client:
-        if full_name and client.full_name != full_name:
-            client.full_name = full_name
-            client.save(update_fields=('full_name',))
-        return client
-    return Client.objects.create(full_name=full_name, phone_number=phone)
 
 
 def _web_app_url(request=None):
@@ -254,6 +232,16 @@ def _is_demo_account(account):
     return settings.DEBUG and account.telegram_id == 900000001
 
 
+def _group_payload(group):
+    return {
+        'id': group.id,
+        'banner_url': group.banner.url if group.banner else '',
+        'start_date': group.start_date.isoformat(),
+        'number_of_days': group.number_of_days,
+        'teachers': [teacher.full_name for teacher in group.teachers.all()],
+    }
+
+
 def _purchase_payload(purchase):
     members = list(purchase.members.all())
     invoices = sorted(purchase.multicard_invoices.all(), key=lambda item: item.pk, reverse=True)
@@ -262,6 +250,9 @@ def _purchase_payload(purchase):
         'id': purchase.id,
         'course': purchase.course.name,
         'course_id': purchase.course_id,
+        'group': _group_payload(purchase.group) if purchase.group else None,
+        'checkout_batch': str(purchase.checkout_batch) if purchase.checkout_batch else '',
+        'can_return_to_cart': can_return_to_cart(purchase, invoices),
         'purchase_type': purchase.purchase_type,
         'purchase_type_label': purchase.get_purchase_type_display(),
         'unit_price': str(purchase.unit_price),
@@ -334,15 +325,70 @@ def _active_course_payloads():
         payload = courses[course.id]
         can_purchase = group.start_date > today
         payload['can_purchase'] = payload['can_purchase'] or can_purchase
-        payload['active_groups'].append({
-            'id': group.id,
-            'banner_url': group.banner.url if group.banner else '',
-            'start_date': group.start_date.isoformat(),
-            'number_of_days': group.number_of_days,
-            'can_purchase': can_purchase,
-            'teachers': [teacher.full_name for teacher in group.teachers.all()],
-        })
+        payload['active_groups'].append({**_group_payload(group), 'can_purchase': can_purchase})
     return list(courses.values())
+
+
+def _document_payload(document):
+    if not document:
+        return None
+    return {'id': document.id, 'category': document.category, 'name': document.original_name}
+
+
+def _cart_payload(account):
+    items = list(
+        account.cart_items.select_related('course', 'group', 'eligibility_document')
+        .prefetch_related('members__eligibility_document', 'group__teachers')
+    )
+    groups = upcoming_groups_by_course({item.course_id for item in items})
+    result = []
+    for item in items:
+        family = list(item.members.all()) if item.purchase_type == MiniAppPurchase.TYPE_FAMILY else []
+        participants = [{'eligibility_document_id': item.eligibility_document_id}] + [
+            {'eligibility_document_id': member.eligibility_document_id} for member in family
+        ]
+        price = quote(item.course, participants, item.payment_mode)
+        available = groups.get(item.course_id, [])
+        if not available:
+            status, message = 'course_unavailable', "Hozircha bu kurs uchun ochiq guruh yo'q. Kurs savatda saqlanib turadi."
+        elif item.group_id not in {group.id for group in available}:
+            status, message = 'choose_group', "Tanlangan guruh boshlangan. Yangi guruhni tanlang."
+        elif item.payment_mode == 'booking' and not price['booking_available']:
+            status, message = 'needs_update', "Bron summasi yetarli emas. To'liq to'lovni tanlang."
+        else:
+            status, message = 'ready', ''
+        result.append({
+            'id': item.id,
+            'course_id': item.course_id,
+            'course': item.course.name,
+            'number_of_days': item.course.number_of_days,
+            'price': str(item.course.price),
+            'group': _group_payload(item.group) if item.group else None,
+            'purchase_type': item.purchase_type,
+            'purchase_type_label': item.get_purchase_type_display(),
+            'payment_mode': item.payment_mode,
+            'payment_mode_label': item.get_payment_mode_display(),
+            'eligibility_document': _document_payload(item.eligibility_document),
+            'members': [
+                {
+                    'full_name': member.full_name,
+                    'phone_number': member.phone_number,
+                    'eligibility_document': _document_payload(member.eligibility_document),
+                }
+                for member in family
+            ],
+            'participant_count': len(participants),
+            'unit_price': str(price['unit_price']),
+            'discount_name': price['discount_name'],
+            'discount_total': str(price['discount_per_person'] * len(participants)),
+            'social_discount_amount': str(price['social_discount']),
+            'total_amount': str(price['total']),
+            'booking_discount': str(price['booking_discount']),
+            'minimum_booking': str(price['minimum_booking']),
+            'status': status,
+            'status_message': message,
+        })
+    return result
 
 
 def _attendance_marker_name(user):
@@ -465,7 +511,8 @@ def telegram_app_bootstrap(request):
     if error:
         return error
     purchases = list(
-        account.purchases.select_related('course').prefetch_related('multicard_invoices')
+        account.purchases.exclude(payment_status=MiniAppPurchase.PAYMENT_CANCELLED)
+        .select_related('course', 'group').prefetch_related('multicard_invoices', 'group__teachers')
         .prefetch_related('members__questionnaire', 'legal_acceptances')
     )
     return JsonResponse({
@@ -480,6 +527,7 @@ def telegram_app_bootstrap(request):
             'terms_version': TERMS_VERSION,
         },
         'courses': _active_course_payloads(),
+        'cart': _cart_payload(account),
         'my_courses': _my_course_payloads(account, purchases),
         'purchases': [_purchase_payload(item) for item in purchases],
     })
@@ -549,7 +597,8 @@ def telegram_app_accept_terms(request):
 
 def _account_purchase(account, purchase_id):
     return (
-        account.purchases.select_related('course', 'telegram_user').prefetch_related('multicard_invoices')
+        account.purchases.select_related('course', 'telegram_user', 'group')
+        .prefetch_related('multicard_invoices', 'group__teachers')
         .prefetch_related('members', 'legal_acceptances')
         .filter(pk=purchase_id)
         .first()
@@ -624,6 +673,24 @@ def telegram_app_accept_contract(request, purchase_id):
         }, status=500)
 
 
+def _terms_required_response():
+    return JsonResponse({
+        'ok': False,
+        'error': "Avval foydalanish shartlarini qabul qiling.",
+    }, status=409)
+
+
+def _upcoming_group(course, group_id):
+    """The chosen upcoming group, or the nearest one when none was chosen."""
+    groups = upcoming_groups_by_course([course.id])[course.id]
+    if not group_id:
+        return groups[0]
+    group = next((item for item in groups if str(item.id) == str(group_id)), None)
+    if group is None:
+        raise ValueError("Tanlangan guruh endi mavjud emas. Boshqa guruhni tanlang.")
+    return group
+
+
 @require_POST
 def telegram_app_create_purchase(request):
     account, error = _authenticate(request)
@@ -631,94 +698,177 @@ def telegram_app_create_purchase(request):
         return error
     try:
         if not terms_accepted(account):
-            return JsonResponse({
-                'ok': False,
-                'error': "Avval foydalanish shartlarini qabul qiling.",
-            }, status=409)
+            return _terms_required_response()
         data = _json_body(request)
         course = Course.objects.filter(
             pk=data.get('course_id'), group__in=Group.objects.upcoming(),
         ).distinct().get()
-        purchase_type = data.get('purchase_type')
-        if purchase_type not in dict(MiniAppPurchase.PURCHASE_TYPES):
-            raise ValueError("Xarid turini tanlang.")
-        if not account.full_name or not account.phone_number:
-            raise ValueError("Avval Telegram botdagi ism va kontakt bosqichini yakunlang.")
-
-        participants = [{
-            'full_name': account.full_name,
-            'phone_number': _normalise_phone(account.phone_number),
-            'relationship': MiniAppPurchaseMember.RELATION_SELF,
-            'eligibility_document_id': data.get('eligibility_document_id'),
-        }]
-        if purchase_type == MiniAppPurchase.TYPE_FAMILY:
-            family_members = data.get('members') or []
-            if not family_members:
-                raise ValueError("Kamida bitta oila a'zosini qo'shing.")
-            if len(family_members) > 7:
-                raise ValueError("Bitta xaridda ko'pi bilan 8 kishi qatnashishi mumkin.")
-            for member in family_members:
-                full_name = (member.get('full_name') or '').strip()
-                if len(full_name) < 3:
-                    raise ValueError("Har bir oila a'zosining to'liq ismini kiriting.")
-                participants.append({
-                    'full_name': full_name[:255],
-                    'phone_number': _normalise_phone(member.get('phone_number')),
-                    'relationship': MiniAppPurchaseMember.RELATION_FAMILY,
-                    'eligibility_document_id': member.get('eligibility_document_id'),
-                })
-        phones = [item['phone_number'] for item in participants]
-        if len(set(phones)) != len(phones):
-            raise ValueError("Bir telefon raqamini ikki marta qo'shib bo'lmaydi.")
-
+        participants = build_participants(
+            account, data.get('purchase_type'), data.get('members'), data.get('eligibility_document_id'),
+        )
         with transaction.atomic():
-            participant_rule = Discount.participant_discount(course.id, len(participants))
-            discount_per_person = min(participant_rule.amount, course.price) if participant_rule else Decimal(0)
-            unit_price = course.price - discount_per_person
-            eligible = 0
-            for participant in participants:
-                proof_id = participant['eligibility_document_id']
-                if proof_id:
-                    if not isinstance(proof_id, int) or not EligibilityDocument.objects.filter(
-                        pk=proof_id, telegram_user=account, phone_number=participant['phone_number'],
-                    ).exists():
-                        raise ValueError("Chegirma uchun shu ishtirokchining tasdiqlovchi hujjatini yuboring.")
-                    eligible += 1
-                else:
-                    participant['eligibility_document_id'] = None
-            social_discount = min(Decimal(100000), unit_price) * eligible
-            total = unit_price * len(participants) - social_discount
-            mode = data.get('payment_mode', 'full')
-            if mode not in ('full', 'booking'):
-                raise ValueError("To'lov usulini tanlang.")
-            discount = booking_discount_for(unit_price, len(participants), course.id) if mode == 'booking' else Decimal(0)
-            discount = min(discount, total)
-            if mode == 'booking' and total - discount < PaymentSettings.booking_minimum() * len(participants):
-                raise ValueError("Bu kurs uchun bron summasi yetarli emas. To'liq to'lovni tanlang.")
-            purchase = MiniAppPurchase.objects.create(
-                telegram_user=account,
-                referrer=account.referrer,
-                social_discount_amount=social_discount,
-                course=course,
-                purchase_type=purchase_type,
-                unit_price=unit_price,
-                discount_per_person=discount_per_person,
-                discount_name=participant_rule.name if participant_rule else '',
-                participant_count=len(participants),
-                total_amount=total,
-                is_booking=mode == 'booking',
-                booking_discount=discount,
+            purchase = create_purchase(
+                account, course, data.get('purchase_type'), participants, data.get('payment_mode', 'full'),
+                group=_upcoming_group(course, data.get('group_id')),
             )
-            MiniAppPurchaseMember.objects.bulk_create([
-                MiniAppPurchaseMember(purchase=purchase, **participant)
-                for participant in participants
-            ])
-        purchase = MiniAppPurchase.objects.select_related('course').prefetch_related('members').get(pk=purchase.pk)
+        purchase = MiniAppPurchase.objects.select_related('course', 'group').prefetch_related('members').get(pk=purchase.pk)
         return JsonResponse({'ok': True, 'purchase': _purchase_payload(purchase)}, status=201)
     except Course.DoesNotExist:
         return JsonResponse({'ok': False, 'error': "Kurs topilmadi."}, status=404)
     except ValueError as exc:
         return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+
+
+@require_POST
+def telegram_app_save_cart_item(request):
+    account, error = _authenticate(request)
+    if error:
+        return error
+    try:
+        data = _json_body(request)
+        course = Course.objects.filter(
+            pk=data.get('course_id'), group__in=Group.objects.upcoming(),
+        ).distinct().get()
+        item = save_cart_item(
+            account, course, _upcoming_group(course, data.get('group_id')), data.get('purchase_type'),
+            data.get('members'), data.get('eligibility_document_id'), data.get('payment_mode', 'booking'),
+        )
+        return JsonResponse({'ok': True, 'item_id': item.id, 'cart': _cart_payload(account)})
+    except Course.DoesNotExist:
+        return JsonResponse({'ok': False, 'error': "Kurs topilmadi yoki yangi guruh hali ochilmagan."}, status=404)
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+
+
+@require_POST
+def telegram_app_remove_cart_item(request, item_id):
+    account, error = _authenticate(request)
+    if error:
+        return error
+    deleted, _ = account.cart_items.filter(pk=item_id).delete()
+    if not deleted:
+        return JsonResponse({'ok': False, 'error': "Savatda bunday kurs topilmadi."}, status=404)
+    return JsonResponse({'ok': True, 'cart': _cart_payload(account)})
+
+
+@require_POST
+def telegram_app_checkout(request):
+    account, error = _authenticate(request)
+    if error:
+        return error
+    if not terms_accepted(account):
+        return _terms_required_response()
+    try:
+        item_ids = _json_body(request).get('item_ids')
+        if not isinstance(item_ids, list) or not item_ids:
+            raise CheckoutError("To'lov uchun kamida bitta kursni tanlang.")
+        if not all(type(item_id) is int for item_id in item_ids):
+            raise CheckoutError("Tanlangan kurslar ro'yxati noto'g'ri.")
+        items = list(
+            account.cart_items.filter(pk__in=item_ids)
+            .select_related('course', 'group').prefetch_related('members')
+        )
+        if len(items) != len(set(item_ids)):
+            raise CheckoutError("Savat yangilangan. Sahifani yangilab, kurslarni qayta tanlang.")
+        purchases = checkout_cart(account, items)
+        return JsonResponse({
+            'ok': True,
+            'purchases': [_purchase_payload(_account_purchase(account, item.pk)) for item in purchases],
+            'cart': _cart_payload(account),
+        }, status=201)
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+
+
+@require_POST
+def telegram_app_return_to_cart(request, purchase_id):
+    account, error = _authenticate(request)
+    if error:
+        return error
+    purchase = _account_purchase(account, purchase_id)
+    if not purchase:
+        return JsonResponse({'ok': False, 'error': "Xarid topilmadi."}, status=404)
+    try:
+        return_to_cart(purchase)
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=409)
+    return JsonResponse({'ok': True, 'cart': _cart_payload(account)})
+
+
+def _selected_purchases(account, ids):
+    if not isinstance(ids, list) or not ids or not all(type(item) is int for item in ids):
+        raise ValueError("Xaridlar ro'yxati noto'g'ri.")
+    purchases = [_account_purchase(account, purchase_id) for purchase_id in dict.fromkeys(ids)]
+    if not all(purchases):
+        raise LookupError
+    return purchases
+
+
+def _contracts_html(purchases):
+    if len(purchases) == 1:
+        return render_contract_document(purchases[0])
+    return ''.join(
+        f'<section class="legal-contract-part"><p class="legal-contract-part__label">'
+        f'{index}-shartnoma · {escape(purchase.course.name)}</p>{render_contract_document(purchase)}</section>'
+        for index, purchase in enumerate(purchases, start=1)
+    )
+
+
+@require_GET
+def telegram_app_contracts(request):
+    """All contracts of one checkout, read and accepted together."""
+    account, error = _authenticate(request)
+    if error:
+        return error
+    try:
+        ids = [int(value) for value in request.GET.get('ids', '').split(',') if value]
+        purchases = _selected_purchases(account, ids)
+        return JsonResponse({
+            'ok': True,
+            'document': {
+                'type': LegalAcceptance.DOCUMENT_CONTRACT,
+                'versions': {str(item.pk): contract_version(item) for item in purchases},
+                'title': "Sog'lomlashtirish xizmatlari shartnomasi",
+                'html': _contracts_html(purchases),
+                'accepted': all(contract_accepted(item) for item in purchases),
+            },
+        })
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+    except LookupError:
+        return JsonResponse({'ok': False, 'error': "Xarid topilmadi."}, status=404)
+
+
+@require_POST
+def telegram_app_accept_contracts(request):
+    account, error = _authenticate(request)
+    if error:
+        return error
+    if not terms_accepted(account):
+        return _terms_required_response()
+    try:
+        data = _json_body(request)
+        purchases = _selected_purchases(account, data.get('purchase_ids'))
+        versions = data.get('versions') or {}
+        if data.get('accepted') is not True or any(
+            versions.get(str(item.pk)) != contract_version(item) for item in purchases
+        ):
+            raise ValueError("Amaldagi shartnomani qabul qiling.")
+        # Every course keeps its own signed contract text and audit hash.
+        with transaction.atomic():
+            for purchase in purchases:
+                record_acceptance(
+                    account, LegalAcceptance.DOCUMENT_CONTRACT, contract_version(purchase),
+                    render_contract_document(purchase), request, purchase=purchase,
+                )
+        return JsonResponse({
+            'ok': True,
+            'purchases': [_purchase_payload(_account_purchase(account, item.pk)) for item in purchases],
+        })
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+    except LookupError:
+        return JsonResponse({'ok': False, 'error': "Xarid topilmadi."}, status=404)
 
 
 @require_POST
@@ -746,6 +896,8 @@ def telegram_app_simulate_payment(request, purchase_id):
             purchase = MiniAppPurchase.objects.select_for_update().get(pk=purchase.pk)
             if purchase.payment_status == MiniAppPurchase.PAYMENT_REFUNDED:
                 raise ValueError("Bu to'lov qaytarilgan.")
+            if purchase.payment_status == MiniAppPurchase.PAYMENT_CANCELLED:
+                raise ValueError("Bu xarid savatga qaytarilgan.")
             if purchase.payment_status != MiniAppPurchase.PAYMENT_SUCCESS:
                 data = _json_body(request)
                 if purchase.is_booking:
@@ -835,6 +987,8 @@ def telegram_app_payment(request, purchase_id):
         return JsonResponse({'ok': True, 'purchase': _purchase_payload(purchase)})
     if purchase.payment_status == MiniAppPurchase.PAYMENT_REFUNDED:
         return JsonResponse({'ok': False, 'error': 'Bu to‘lov qaytarilgan. Yangi xarid yarating.'}, status=409)
+    if purchase.payment_status == MiniAppPurchase.PAYMENT_CANCELLED:
+        return JsonResponse({'ok': False, 'error': 'Bu xarid savatga qaytarilgan. Savatdan qayta rasmiylashtiring.'}, status=409)
     try:
         data = _json_body(request)
         invoice = get_or_create_invoice(

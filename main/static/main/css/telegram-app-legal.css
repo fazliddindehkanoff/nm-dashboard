@@ -269,3 +269,21 @@
 @media (prefers-reduced-motion: reduce) {
   .legal-progress span { transition: none; }
 }
+
+.legal-contract-part + .legal-contract-part {
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 2px dashed var(--line);
+}
+
+.legal-contract-part__label {
+  display: inline-block;
+  margin: 0 0 12px !important;
+  padding: 6px 10px;
+  border-radius: 99px;
+  background: var(--ice);
+  color: var(--turquoise-dark);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}

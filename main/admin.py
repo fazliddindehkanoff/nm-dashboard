@@ -1,6 +1,7 @@
 import re
 from datetime import timedelta
 from decimal import Decimal
+from urllib.parse import urlencode
 
 from django import forms
 from django.apps import apps
@@ -33,7 +34,8 @@ from unfold.widgets import (
 from .models import (
     Course, Group, Client, Operator, Discount, Transaction, TransactionClient, SubTransaction, Teacher,
     AttendanceLesson, AttendanceRecord, Expense, RoleConfiguration, PaymentSettings,
-    EligibilityDocument, EnrollmentQuestionnaire, LegalAcceptance, MiniAppPurchase, MiniAppPurchaseMember, MulticardInvoice,
+    EligibilityDocument, EnrollmentQuestionnaire, LegalAcceptance, MiniAppCartItem, MiniAppCartMember,
+    MiniAppPurchase, MiniAppPurchaseMember, MulticardInvoice,
     TelegramCampaign, TelegramCampaignRecipient, TelegramUser,
     _recalc_transaction_participants, sub_transaction_shares,
 )
@@ -49,6 +51,7 @@ from .services.amocrm import (
 from .services.telegram import send_payment_qr, TelegramNotConfigured
 from .services.telegram_campaigns import queue_campaign
 from .services.legal import contract_version, TERMS_VERSION
+from .services.mini_app import sync_group_payment
 
 
 def _is_plain_operator(request):
@@ -173,7 +176,8 @@ class GroupAdmin(ModelAdmin):
     form = GroupForm
     change_form_template = 'admin/main/group/change_form.html'
     list_display = (
-        'group_link', 'course', 'get_teachers', 'start_date', 'number_of_days', 'active_badge',
+        'group_link', 'course', 'get_teachers', 'start_date', 'number_of_days',
+        'participants_count', 'active_badge',
     )
     list_display_links = None
     search_fields = ('course__name', 'teachers__full_name')
@@ -240,6 +244,20 @@ class GroupAdmin(ModelAdmin):
             return self._archive_confirmation(request, self.get_queryset(request).filter(pk=group.pk))
         return super().delete_view(request, object_id, extra_context)
 
+    def get_queryset(self, request):
+        # Qaytarilmagan to'lovlardagi (web app to'lovlari ham) noyob mijozlar.
+        return super().get_queryset(request).select_related('course').prefetch_related('teachers').annotate(
+            _participants_count=models.Count(
+                'transaction__participants__client',
+                filter=models.Q(transaction__is_refunded=False),
+                distinct=True,
+            ),
+        )
+
+    @display(description=_("Ishtirokchilar"), ordering='_participants_count')
+    def participants_count(self, obj):
+        return obj._participants_count
+
     # ---- Guruh ustiga bosilganda o'zgartirish emas, detail sahifa ochiladi ----
     def get_urls(self):
         urls = super().get_urls()
@@ -296,6 +314,18 @@ class GroupAdmin(ModelAdmin):
             .select_related("operator")
             .order_by("-date", "-id")
         )
+        participants_count = (
+            TransactionClient.objects.filter(transaction__group=group, transaction__is_refunded=False)
+            .values('client_id').distinct().count()
+        )
+        # Eski web app to'lovlarida guruh tanlanmagan; admin ularni biriktirishi kerak.
+        unassigned_web_payments = MiniAppPurchase.objects.filter(
+            course_id=group.course_id, group__isnull=True, paid_amount__gt=0,
+        ).count()
+        unassigned_web_payments_url = "%s?%s" % (
+            reverse("admin:main_miniapppurchase_changelist"),
+            urlencode({'course__id__exact': group.course_id, 'group__isempty': '1', 'paid_amount__gt': '0'}),
+        )
 
         active_tab = request.GET.get('tab', 'payments')
         if active_tab not in {'payments', 'attendance', 'anketa', 'statistics'}:
@@ -346,6 +376,9 @@ class GroupAdmin(ModelAdmin):
             "title": str(group),
             "group": group,
             "transactions": transactions,
+            "participants_count": participants_count,
+            "unassigned_web_payments": unassigned_web_payments,
+            "unassigned_web_payments_url": unassigned_web_payments_url,
             "teachers": group.teachers.all(),
             "active_tab": active_tab,
             "attendance_records": attendance_records,
@@ -2467,34 +2500,75 @@ class MulticardInvoiceInline(TabularInline):
         return request.user.has_perm('main.view_miniapppurchase')
 
 
+class MiniAppPurchaseAdminForm(forms.ModelForm):
+    class Meta:
+        model = MiniAppPurchase
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if 'group' in self.fields and self.instance.course_id:
+            self.fields['group'].queryset = Group.objects.filter(
+                course_id=self.instance.course_id,
+            ).order_by('-start_date')
+
+
 @admin.register(MiniAppPurchase)
 class MiniAppPurchaseAdmin(ModelAdmin):
+    form = MiniAppPurchaseAdminForm
     list_display = (
-        'telegram_user', 'course', 'purchase_type', 'participant_count',
+        'telegram_user', 'course', 'group', 'purchase_type', 'participant_count',
         'total_amount', 'discount_amount', 'paid_amount', 'balance', 'contract_status', 'payment_status',
-        'questionnaire_completed', 'created_at',
+        'group_payment_link', 'questionnaire_completed', 'created_at',
     )
-    list_filter = ('payment_status', 'purchase_type', 'questionnaire_completed', 'course')
+    list_filter = (
+        'payment_status', 'purchase_type', 'questionnaire_completed', 'course',
+        ('group', admin.EmptyFieldListFilter),
+    )
     search_fields = (
         'telegram_user__full_name', 'telegram_user__phone_number',
         'members__full_name', 'members__phone_number', 'payment_reference',
     )
     readonly_fields = ('referrer', 'social_discount_amount', 'uuid', 'discount_name', 'discount_per_person', 'created_at', 'updated_at', 'paid_at', 'booking_discount',
-                       'discount_amount', 'paid_amount', 'balance')
+                       'discount_amount', 'paid_amount', 'balance', 'group_payment_link')
     autocomplete_fields = ('telegram_user', 'course')
     inlines = (MiniAppPurchaseMemberInline, MulticardInvoiceInline,)
 
     def get_queryset(self, request):
-        queryset = super().get_queryset(request)
+        queryset = super().get_queryset(request).select_related(
+            'telegram_user', 'course', 'group__course', 'group_payment',
+        ).prefetch_related('group__teachers')
         return queryset.filter(referrer=request.user.operator) if _is_plain_operator(request) else queryset
 
     def get_readonly_fields(self, request, obj=None):
         fields = super().get_readonly_fields(request, obj)
         if obj:
-            return (*fields, 'telegram_user', 'course', 'purchase_type', 'participant_count',
-                    'unit_price', 'total_amount', 'is_booking', 'payment_status',
-                    'payment_provider', 'payment_reference')
+            fields = (*fields, 'telegram_user', 'course', 'purchase_type', 'participant_count',
+                      'unit_price', 'total_amount', 'is_booking', 'payment_status',
+                      'payment_provider', 'payment_reference')
+            # Guruh to'lovi yozilgach guruhni faqat to'lovning o'zida o'zgartirish mumkin.
+            if hasattr(obj, 'group_payment'):
+                fields = (*fields, 'group')
         return fields
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if obj.group_id and obj.paid_amount > 0:
+            with db_transaction.atomic():
+                if sync_group_payment(obj):
+                    self.message_user(
+                        request, _("To'lov guruhning to'lovlar ro'yxatiga yozildi."), level=messages.SUCCESS,
+                    )
+
+    @display(description=_("Guruh to'lovi"))
+    def group_payment_link(self, obj):
+        payment = getattr(obj, 'group_payment', None)
+        if not payment:
+            return "—"
+        return format_html(
+            '<a href="{}" class="hover:underline">#{}</a>',
+            reverse('admin:main_transaction_change', args=[payment.pk]), payment.pk,
+        )
 
     @display(description=_("Qolgan qarz"))
     def balance(self, obj):
@@ -2506,6 +2580,43 @@ class MiniAppPurchaseAdmin(ModelAdmin):
             document_type=LegalAcceptance.DOCUMENT_CONTRACT,
             version=contract_version(obj),
         ).exists()
+
+
+class MiniAppCartMemberInline(TabularInline):
+    model = MiniAppCartMember
+    extra = 0
+    can_delete = False
+    readonly_fields = ('full_name', 'phone_number', 'eligibility_document')
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(MiniAppCartItem)
+class MiniAppCartItemAdmin(ModelAdmin):
+    """Savatda qolgan kurslar — operatorlar mijoz bilan bog'lanishi uchun."""
+
+    list_display = ('telegram_user', 'phone_number', 'course', 'group', 'purchase_type', 'payment_mode', 'created_at', 'updated_at')
+    list_filter = ('course', 'purchase_type', 'payment_mode', 'created_at')
+    search_fields = ('telegram_user__full_name', 'telegram_user__phone_number', 'course__name')
+    readonly_fields = ('telegram_user', 'course', 'group', 'purchase_type', 'payment_mode', 'eligibility_document', 'created_at', 'updated_at')
+    inlines = (MiniAppCartMemberInline,)
+
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request).select_related('telegram_user', 'course', 'group__course')
+        if _is_plain_operator(request):
+            queryset = queryset.filter(telegram_user__referrer=request.user.operator)
+        return queryset
+
+    @display(description=_("Telefon"))
+    def phone_number(self, obj):
+        return obj.telegram_user.phone_number or "—"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(EnrollmentQuestionnaire)

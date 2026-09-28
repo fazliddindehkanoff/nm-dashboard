@@ -5,6 +5,7 @@ billing acknowledgement, so they must commit before returning success=True.
 """
 import hashlib
 import hmac
+import logging
 import re
 from decimal import Decimal
 from urllib.parse import urlsplit
@@ -17,6 +18,20 @@ from django.utils import timezone
 
 from main.models import Client, MiniAppPurchase, MiniAppPurchaseMember, MulticardInvoice
 from .booking import check_payment_version, payment_amount
+from .mini_app import sync_group_payment
+
+
+logger = logging.getLogger(__name__)
+
+
+def _sync_group_payment(purchase):
+    # Settling real money must never fail because the CRM mirror could not be
+    # written; staff can re-save the purchase in the admin to retry.
+    try:
+        with transaction.atomic():
+            sync_group_payment(purchase)
+    except Exception:
+        logger.exception('Group payment sync failed for purchase %s', purchase.pk)
 
 
 class MulticardError(Exception):
@@ -231,6 +246,7 @@ def _settle(invoice, payment_uuid, receipt_url='', provider='multicard'):
         from main.models import PaymentQRDelivery
         for member in purchase.members.all():
             PaymentQRDelivery.objects.get_or_create(invoice=invoice, member=member)
+    _sync_group_payment(purchase)
 
 
 def accept_success_callback(data):
@@ -307,6 +323,7 @@ def reconcile_invoice(invoice):
                 paid_amount=paid, discount_amount=discount,
                 payment_status=purchase_status, updated_at=timezone.now(),
             )
+            _sync_group_payment(purchase)
         elif status == 'error' and invoice.state not in ('success', 'revert'):
             invoice.state = 'error'
             invoice.save(update_fields=('state', 'updated_at'))

@@ -289,10 +289,12 @@ class Transaction(models.Model):
 
     # Sotuv manbasi ikkiga bo'linadi: amoCRM da bor / amoCRM da yo'q.
     # "amoCRM da bor" o'z navbatida ikkiga: sayt orqali kelgan yoki boshqa.
+    SOURCE_TELEGRAM_APP = 'telegram_app'
     SOURCE_TYPES = (
         ('amocrm_website', _("amoCRM'da bor — sayt orqali")),
         ('amocrm_other', _("amoCRM'da bor — boshqa")),
         ('not_in_amocrm', _("amoCRM'da yo'q")),
+        (SOURCE_TELEGRAM_APP, _("Telegram web app")),
     )
 
     operator = models.ForeignKey(Operator, on_delete=models.SET_NULL, null=True, verbose_name=_("Operator"))
@@ -355,6 +357,17 @@ class Transaction(models.Model):
     course_price = models.DecimalField(_("Kurs narxi"), max_digits=12, decimal_places=2, editable=False, default=0)
     discount_total = models.DecimalField(_("Jami chegirma"), max_digits=12, decimal_places=2, editable=False, default=0)
 
+    # Web app orqali to'langan xarid shu to'lov sifatida guruhga yoziladi.
+    mini_app_purchase = models.OneToOneField(
+        'MiniAppPurchase',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        editable=False,
+        related_name='group_payment',
+        verbose_name=_("Web app xaridi"),
+    )
+
     class Meta:
         verbose_name = _("To'lov")
         verbose_name_plural = _("To'lovlar")
@@ -376,6 +389,8 @@ class Transaction(models.Model):
             _recalc_transaction_participants(self)
 
     def calculate_discount_total(self, participant_count):
+        if self.mini_app_purchase_id:
+            return self._mini_app_discount_total(participant_count)
         course_id = self.group.course_id if self.group else None
         booking_discount = Decimal(0)
         if self.payment_type == 'bron':
@@ -393,6 +408,16 @@ class Transaction(models.Model):
             if rule:
                 additional_discount = max(additional_discount, rule.amount * participant_count)
         return booking_discount + additional_discount
+
+    def _mini_app_discount_total(self, participant_count):
+        # Web app prices, family/social/booking discounts are fixed at checkout;
+        # the CRM discount is whatever makes the debt equal the purchase balance.
+        purchase = self.mini_app_purchase
+        if not self.group or not participant_count or not purchase.participant_count:
+            return Decimal(0)
+        net_due = (purchase.total_amount - purchase.discount_amount) * participant_count / purchase.participant_count
+        gross = Decimal(str(self.group.course.price)) * participant_count
+        return max(gross - net_due, Decimal(0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
     def __str__(self):
         names = ", ".join(c.full_name for c in self.clients.all()) if self.pk else ""
@@ -1010,12 +1035,14 @@ class MiniAppPurchase(models.Model):
     PAYMENT_SUCCESS = 'success'
     PAYMENT_FAILED = 'failed'
     PAYMENT_REFUNDED = 'refunded'
+    PAYMENT_CANCELLED = 'cancelled'
     PAYMENT_STATUSES = (
         (PAYMENT_PENDING, _("To'lov kutilmoqda")),
         (PAYMENT_PARTIAL, _("Bron qilingan — qisman to'langan")),
         (PAYMENT_SUCCESS, _("To'langan")),
         (PAYMENT_FAILED, _("To'lov amalga oshmadi")),
         (PAYMENT_REFUNDED, _("To'lov qaytarilgan")),
+        (PAYMENT_CANCELLED, _("Savatga qaytarilgan")),
     )
 
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
@@ -1031,6 +1058,17 @@ class MiniAppPurchase(models.Model):
         related_name='mini_app_purchases',
         verbose_name=_("Kurs"),
     )
+    group = models.ForeignKey(
+        Group,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='mini_app_purchases',
+        verbose_name=_("Guruh"),
+        help_text=_("To'lovlar shu guruhning to'lovlar ro'yxatiga yoziladi."),
+    )
+    # Savatdan bir vaqtda rasmiylashtirilgan kurslar bitta partiyaga kiradi.
+    checkout_batch = models.UUIDField(_("Savat partiyasi"), null=True, blank=True, editable=False, db_index=True)
     purchase_type = models.CharField(
         _("Xarid turi"), max_length=10, choices=PURCHASE_TYPES, default=TYPE_SELF,
     )
@@ -1160,6 +1198,76 @@ class MiniAppPurchaseMember(models.Model):
                 fields=('purchase', 'phone_number'), name='uniq_purchase_member_phone',
             ),
         ]
+
+    def __str__(self):
+        return self.full_name
+
+
+class MiniAppCartItem(models.Model):
+    """A course the user plans to buy. Cart items never expire; checkout turns
+    them into purchases, and an unpaid purchase can be returned to the cart."""
+
+    MODE_FULL = 'full'
+    MODE_BOOKING = 'booking'
+    PAYMENT_MODES = (
+        (MODE_BOOKING, _("Bron — bo'lib to'lash")),
+        (MODE_FULL, _("To'liq to'lov")),
+    )
+
+    telegram_user = models.ForeignKey(
+        TelegramUser, on_delete=models.CASCADE, related_name='cart_items',
+        verbose_name=_("Telegram foydalanuvchi"),
+    )
+    course = models.ForeignKey(
+        Course, on_delete=models.CASCADE, related_name='cart_items', verbose_name=_("Kurs"),
+    )
+    group = models.ForeignKey(
+        Group, on_delete=models.SET_NULL, null=True, blank=True, related_name='cart_items',
+        verbose_name=_("Tanlangan guruh"),
+    )
+    purchase_type = models.CharField(
+        _("Xarid turi"), max_length=10,
+        choices=MiniAppPurchase.PURCHASE_TYPES, default=MiniAppPurchase.TYPE_SELF,
+    )
+    payment_mode = models.CharField(
+        _("To'lov tartibi"), max_length=10, choices=PAYMENT_MODES, default=MODE_BOOKING,
+    )
+    eligibility_document = models.ForeignKey(
+        'EligibilityDocument', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+        verbose_name=_("Xaridor chegirma hujjati"),
+    )
+    created_at = models.DateTimeField(_("Savatga qo'shilgan vaqt"), auto_now_add=True)
+    updated_at = models.DateTimeField(_("Yangilangan vaqt"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("Savatdagi kurs")
+        verbose_name_plural = _("Web app savati")
+        ordering = ('created_at', 'id')
+        constraints = [
+            models.UniqueConstraint(fields=('telegram_user', 'course'), name='uniq_cart_course_per_user'),
+        ]
+
+    def __str__(self):
+        return f"{self.telegram_user} — {self.course}"
+
+
+class MiniAppCartMember(models.Model):
+    """Family member added to a cart item (the buyer is always included)."""
+
+    item = models.ForeignKey(
+        MiniAppCartItem, on_delete=models.CASCADE, related_name='members', verbose_name=_("Savatdagi kurs"),
+    )
+    full_name = models.CharField(_("To'liq ism"), max_length=255)
+    phone_number = models.CharField(_("Telefon raqami"), max_length=20)
+    eligibility_document = models.ForeignKey(
+        'EligibilityDocument', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+        verbose_name=_("Chegirma hujjati"),
+    )
+
+    class Meta:
+        verbose_name = _("Savatdagi oila a'zosi")
+        verbose_name_plural = _("Savatdagi oila a'zolari")
+        ordering = ('id',)
 
     def __str__(self):
         return self.full_name

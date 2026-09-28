@@ -354,6 +354,12 @@ UNFOLD = {
                         "permission": "main.permissions.can_manage_users",
                     },
                     {
+                        "title": "Web app savati",
+                        "icon": "shopping_cart",
+                        "link": "/admin/main/miniappcartitem/",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                    {
                         "title": "Yuridik roziliklar",
                         "icon": "verified_user",
                         "link": "/admin/main/legalacceptance/",

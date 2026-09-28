@@ -122,7 +122,10 @@ def payments(request):
         except ValueError:
             return None
     start, end = date_filter(request.GET.get('from', '')), date_filter(request.GET.get('to', ''))
-    manual = Transaction.objects.select_related('group__course', 'operator').prefetch_related('clients', 'sub_transactions')
+    # Web app payments are listed from their invoices; their CRM mirror is skipped.
+    manual = Transaction.objects.filter(mini_app_purchase__isnull=True).select_related(
+        'group__course', 'operator',
+    ).prefetch_related('clients', 'sub_transactions')
     subs = SubTransaction.objects.select_related('transaction__group__course', 'transaction__operator').prefetch_related('clients')
     online = MulticardInvoice.objects.select_related('purchase__course', 'purchase__telegram_user', 'purchase__referrer').exclude(store_id='demo').annotate(effective_at=Coalesce('paid_at', 'created_at'))
     if is_operator(request.user):

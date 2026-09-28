@@ -22,6 +22,13 @@
     legalReadOnly: false,
     legalReturnView: 'homeView',
     selectedCourse: null,
+    cart: [],
+    cartSelection: new Set(),
+    knownCartIds: new Set(),
+    config: null,
+    batch: [],
+    contractBatch: null,
+    answers: {},
   };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -71,12 +78,25 @@
   function showView(id, step = 1) {
     $$('.view').forEach(node => node.classList.toggle('is-active', node.id === id));
     $('.hero').style.display = id === 'homeView' ? '' : 'none';
-    $('.bottom-nav').style.display = ['homeView', 'coursesView', 'profileView'].includes(id) ? '' : 'none';
+    $('.bottom-nav').style.display = ['homeView', 'coursesView', 'cartView', 'profileView'].includes(id) ? '' : 'none';
     setJourney(step); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function setMainNav(name) {
     $$('.bottom-nav button').forEach(node => node.classList.toggle('is-active', node.dataset.nav === name));
+  }
+
+  function confirmAction(message) {
+    if (tg?.showConfirm && (!tg.isVersionAtLeast || tg.isVersionAtLeast('6.2'))) {
+      return new Promise(resolve => tg.showConfirm(message, resolve));
+    }
+    return Promise.resolve(window.confirm(message));
+  }
+
+  function daysUntil(value) {
+    const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+    const today = new Date();
+    return Math.round((Date.UTC(year, month - 1, day) - Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000);
   }
 
   function configureLegalGate(kind, documentData, readOnly = false) {
@@ -87,6 +107,7 @@
     const button = $(`#accept${kind === 'terms' ? 'Terms' : 'Contract'}`);
     const intro = $(`#${prefix}Intro`);
     const label = consent.closest('.legal-consent');
+    const multiple = kind === 'contract' && (state.contractBatch?.ids.length || 0) > 1;
     scroll.innerHTML = documentData.html;
     scroll.scrollTop = 0;
     consent.checked = false;
@@ -107,7 +128,9 @@
       button.textContent = 'Oxirigacha o‘qing';
       intro.textContent = kind === 'terms'
         ? 'Davom etishdan oldin hujjatni oxirigacha o‘qing. Roziligingiz sana, qurilma va hujjat versiyasi bilan saqlanadi.'
-        : 'Shartnoma aynan shu xarid ma’lumotlari asosida tayyorlandi. Oxirigacha o‘qigach tasdiqlash faollashadi.';
+        : multiple
+          ? `Har bir kurs uchun alohida shartnoma tayyorlandi (${state.contractBatch.ids.length} ta). Oxirigacha o‘qigach, barchasini bir marta tasdiqlaysiz.`
+          : 'Shartnoma aynan shu xarid ma’lumotlari asosida tayyorlandi. Oxirigacha o‘qigach tasdiqlash faollashadi.';
     }
 
     const updateGate = () => {
@@ -116,7 +139,7 @@
       progress.style.width = `${Math.round(ratio * 100)}%`;
       if (!readOnly && ratio >= .995) {
         consent.disabled = false;
-        button.textContent = kind === 'terms' ? 'Qabul qilaman' : 'Shartnomani qabul qilaman';
+        button.textContent = kind === 'terms' ? 'Qabul qilaman' : multiple ? 'Shartnomalarni qabul qilaman' : 'Shartnomani qabul qilaman';
         button.disabled = !consent.checked;
       }
     };
@@ -141,6 +164,7 @@
 
   async function openContract(purchase, readOnly = false) {
     try {
+      state.contractBatch = null;
       state.purchase = purchase;
       const data = await api(`/telegram-app/api/purchases/${purchase.id}/contract/`);
       const current = { ...purchase, contract_accepted: data.document.accepted };
@@ -148,6 +172,20 @@
       replacePurchase(current);
       state.legalReturnView = readOnly ? 'homeView' : 'homeView';
       configureLegalGate('contract', data.document, readOnly && data.document.accepted);
+      showView('contractView', 2);
+    } catch (error) {
+      toast(error.message, true);
+    }
+  }
+
+  async function openBatchContract(purchases) {
+    try {
+      const ids = purchases.map(item => item.id);
+      const data = await api(`/telegram-app/api/purchases/contracts/?ids=${ids.join(',')}`);
+      state.purchase = purchases[0];
+      state.contractBatch = { ids, versions: data.document.versions };
+      state.legalReturnView = 'cartView';
+      configureLegalGate('contract', data.document, false);
       showView('contractView', 2);
     } catch (error) {
       toast(error.message, true);
@@ -205,20 +243,33 @@
     $('[data-overview-course]', host).addEventListener('click', () => openCourseDetail(featured.id));
   }
 
+  const cartItemForCourse = courseId => state.cart.find(item => item.course_id === courseId);
+
+  function bestDiscountHint(course) {
+    const rule = [...(course.participant_discounts || [])].sort((a, b) => a.min_participants - b.min_participants)[0];
+    return rule ? `${rule.min_participants}+ kishi: har biriga −${money(rule.amount)}` : '';
+  }
+
   function renderCourses() {
     const groups = state.courses.flatMap(course => course.active_groups.map(group => ({ ...group, course })))
       .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.id - b.id);
     $('#courseCount').textContent = `${groups.length} ta guruh`;
     $('#courseList').innerHTML = groups.length ? `
       <div class="group-schedule__head" aria-hidden="true"><span>O‘qituvchi</span><span>Mashg‘ulot</span><span>Boshlanish</span><span>Bir kishi uchun</span></div>
-      <ul class="group-schedule__list" aria-label="Faol guruhlar jadvali">${groups.map(group => `
-        <li class="schedule-row" data-group-id="${group.id}">
+      <ul class="group-schedule__list" aria-label="Faol guruhlar jadvali">${groups.map(group => {
+        // The cart holds one group per course; only that group's row is marked.
+        const inCart = cartItemForCourse(group.course.id)?.group?.id === group.id;
+        const hint = bestDiscountHint(group.course);
+        const label = !group.can_purchase ? 'Qabul yopilgan' : inCart ? '✓ Savatda' : 'Savatga qo‘shish';
+        return `
+        <li class="schedule-row${inCart && group.can_purchase ? ' is-in-cart' : ''}" data-group-id="${group.id}">
           <div class="schedule-row__teacher"><small>O‘qituvchi</small><strong>${escapeHtml(group.teachers?.join(', ') || 'Tez orada e’lon qilinadi')}</strong></div>
-          <div class="schedule-row__course"><small>Mashg‘ulot</small><h3>${escapeHtml(group.course.name)}</h3><span class="schedule-row__status ${group.can_purchase ? 'is-open' : ''}">${group.can_purchase ? 'Qabul ochiq' : 'Boshlangan'}</span></div>
+          <div class="schedule-row__course"><small>Mashg‘ulot</small><h3>${escapeHtml(group.course.name)}</h3><span class="schedule-row__status ${group.can_purchase ? 'is-open' : ''}">${group.can_purchase ? 'Qabul ochiq' : 'Boshlangan'}</span>${hint && group.can_purchase ? `<span class="schedule-row__offer">${escapeHtml(hint)}</span>` : ''}</div>
           <div class="schedule-row__date"><small>Boshlanish</small><time datetime="${group.start_date}">${formatDate(group.start_date)}</time><span>${group.number_of_days} kunlik dars</span></div>
-          <div class="schedule-row__payment"><small>Bir kishi uchun</small><strong>${money(group.course.price)}</strong><button class="schedule-row__button" type="button" data-course-id="${group.course.id}" ${group.can_purchase ? '' : 'disabled'} aria-label="${escapeHtml(group.course.name)} — ${formatDate(group.start_date)}: kursga yozilish">${group.can_purchase ? 'Kursga yozilish ↗' : 'Qabul yopilgan'}</button></div>
-        </li>`).join('')}</ul>` : '<div class="schedule-empty"><h3>Hozircha faol guruh yo‘q</h3><p>Yangi guruh ochilganda jadval shu yerda paydo bo‘ladi.</p></div>';
-    $$('[data-course-id]', $('#courseList')).forEach(button => button.addEventListener('click', () => startCheckout(Number(button.dataset.courseId))));
+          <div class="schedule-row__payment"><small>Bir kishi uchun</small><strong>${money(group.course.price)}</strong><button class="schedule-row__button" type="button" data-course-id="${group.course.id}" data-start-group="${group.id}" ${group.can_purchase ? '' : 'disabled'} aria-label="${escapeHtml(group.course.name)} — ${formatDate(group.start_date)}: ${label}">${label}</button></div>
+        </li>`;
+      }).join('')}</ul>` : '<div class="schedule-empty"><h3>Hozircha faol guruh yo‘q</h3><p>Yangi guruh ochilganda jadval shu yerda paydo bo‘ladi.</p></div>';
+    $$('[data-course-id]', $('#courseList')).forEach(button => button.addEventListener('click', () => startCheckout(Number(button.dataset.courseId), 'coursesView', Number(button.dataset.startGroup))));
   }
 
   function renderMyCourses() {
@@ -247,21 +298,25 @@
   }
 
   function renderHistory() {
-    const host = $('#purchaseHistory');
     const pendingPurchases = state.purchases.filter(item => item.payment_status !== 'success' || !item.questionnaire_completed);
-    if (!pendingPurchases.length) { host.innerHTML = ''; return; }
-    host.innerHTML = `<h2 class="history-heading">Yakunlanmagan xaridlar</h2>${pendingPurchases.map(item => {
+    const html = pendingPurchases.length ? `<h2 class="history-heading">Yakunlanmagan xaridlar</h2>${pendingPurchases.map(item => {
       const done = item.questionnaire_completed && item.payment_status === 'success';
       const paid = item.payment_status === 'success';
       const label = done ? 'Tayyor' : paid ? 'Anketa kutilmoqda' : item.payment_status_label;
       const contractLink = item.contract_accepted ? `<button type="button" class="continue-button" data-view-contract="${item.id}">Shartnomani ko‘rish</button>` : '';
-      return `<article class="purchase-card"><div class="purchase-card__head"><div><h3>${escapeHtml(item.course)}</h3><p>${item.participant_count} ishtirokchi · ${money(item.total_amount)}</p>${item.is_booking ? `<p>To‘langan: ${money(item.paid_amount)} · Qolgan: ${money(item.payable_amount)}</p>` : ''}</div><span class="status status--${done ? 'success' : 'pending'}">${label}</span></div>${done ? contractLink : `<button type="button" class="continue-button" data-resume="${item.id}">Davom ettirish →</button>${contractLink}`}</article>`;
-    }).join('')}`;
-    $$('[data-resume]').forEach(button => button.addEventListener('click', () => resumePurchase(Number(button.dataset.resume))));
-    $$('[data-view-contract]').forEach(button => button.addEventListener('click', () => {
-      const purchase = state.purchases.find(item => item.id === Number(button.dataset.viewContract));
-      if (purchase) openContract(purchase, true);
-    }));
+      const returnLink = item.can_return_to_cart ? `<button type="button" class="text-button" data-return-to-cart="${item.id}">Savatga qaytarish</button>` : '';
+      return `<article class="purchase-card"><div class="purchase-card__head"><div><h3>${escapeHtml(item.course)}</h3><p>${item.group ? `${formatDate(item.group.start_date)} · ` : ''}${item.participant_count} ishtirokchi · ${money(item.total_amount)}</p>${item.is_booking ? `<p>To‘langan: ${money(item.paid_amount)} · Qolgan: ${money(item.payable_amount)}</p>` : ''}</div><span class="status status--${done ? 'success' : 'pending'}">${label}</span></div><div class="purchase-card__actions">${done ? contractLink : `<button type="button" class="continue-button" data-resume="${item.id}">${paid ? 'Anketani to‘ldirish →' : 'To‘lash →'}</button>${contractLink}`}${returnLink}</div></article>`;
+    }).join('')}` : '';
+    ['#purchaseHistory', '#cartOrders'].forEach(selector => {
+      const host = $(selector);
+      host.innerHTML = html;
+      $$('[data-resume]', host).forEach(button => button.addEventListener('click', () => resumePurchase(Number(button.dataset.resume))));
+      $$('[data-return-to-cart]', host).forEach(button => button.addEventListener('click', () => returnToCart(Number(button.dataset.returnToCart))));
+      $$('[data-view-contract]', host).forEach(button => button.addEventListener('click', () => {
+        const purchase = state.purchases.find(item => item.id === Number(button.dataset.viewContract));
+        if (purchase) openContract(purchase, true);
+      }));
+    });
   }
 
   function lessonTone(status) {
@@ -314,11 +369,56 @@
     showView('courseDetailView', 1);
   }
 
-  function startCheckout(courseId) {
-    state.course = state.courses.find(course => course.id === courseId); state.purchase = null; state.type = 'self';
-    $('#checkoutCourse').textContent = state.course.name; $$('.segment__item').forEach((node, i) => node.classList.toggle('is-active', i === 0));
-    $('#selfEligibility').innerHTML = eligibilityFields(); bindEligibility($('#selfEligibility'));
-    $('#paymentMode').value = 'booking'; $('#familyArea').hidden = true; $('#familyMembers').innerHTML = ''; updateTotal(); showView('checkoutView', 1);
+  const openGroups = course => course.active_groups.filter(group => group.can_purchase);
+
+  function startCheckout(courseId, returnView = 'coursesView', preferredGroupId = null) {
+    const course = state.courses.find(item => item.id === courseId);
+    const groups = course ? openGroups(course) : [];
+    if (!groups.length) return toast('Bu kurs uchun hozircha ochiq guruh yo‘q.', true);
+    const item = cartItemForCourse(courseId);
+    const groupIds = groups.map(group => group.id);
+    const preferred = [preferredGroupId, item?.group?.id].find(id => groupIds.includes(id));
+    state.course = course; state.purchase = null;
+    state.config = { item, returnView, groupId: preferred || groupIds[0] };
+    $('#checkoutCourse').textContent = course.name;
+    $('#checkoutKicker').textContent = item ? 'Savatdagi kursni tahrirlash' : 'Savatga qo‘shish';
+    $('#checkoutBackLabel').textContent = returnView === 'cartView' ? 'Savatga qaytish' : 'Kurslarga qaytish';
+    $('#checkoutMeta').textContent = `${course.number_of_days} kunlik dastur · bir kishi uchun ${money(course.price)}`;
+    $('#discountHint').textContent = bestDiscountHint(course);
+    $('#continueToPayment').textContent = item ? 'Saqlash' : 'Savatga qo‘shish';
+    $('#selfEligibility').innerHTML = eligibilityFields(item?.eligibility_document); bindEligibility($('#selfEligibility'));
+    $('#familyMembers').innerHTML = '';
+    (item?.purchase_type === 'family' ? item.members : []).forEach(member => addFamilyMember(member));
+    $('#paymentMode').value = item?.payment_mode || 'booking';
+    renderGroupOptions();
+    setPurchaseType(item?.purchase_type || 'self');
+    showView('checkoutView', 1);
+  }
+
+  function renderGroupOptions() {
+    const groupId = state.config.groupId;
+    const groups = openGroups(state.course);
+    $('#groupCount').textContent = `${groups.length} ta guruh`;
+    $('#groupOptions').innerHTML = groups.map((group, index) => {
+      const selected = group.id === groupId;
+      return `<button type="button" class="group-option${selected ? ' is-selected' : ''}" data-group-id="${group.id}" role="radio" aria-checked="${selected}">
+        <span class="group-option__radio" aria-hidden="true"></span>
+        <span class="group-option__body"><strong>${formatDate(group.start_date)}</strong><small>${group.number_of_days} kun · ${escapeHtml(group.teachers.join(', ') || 'Ustoz tez orada')}</small></span>
+        <span class="group-option__tag">${index === 0 ? 'Eng yaqin' : `${daysUntil(group.start_date)} kundan so‘ng`}</span>
+      </button>`;
+    }).join('');
+    $$('[data-group-id]', $('#groupOptions')).forEach(button => button.addEventListener('click', () => {
+      state.config.groupId = Number(button.dataset.groupId);
+      renderGroupOptions();
+    }));
+  }
+
+  function setPurchaseType(type) {
+    state.type = type;
+    $$('.segment__item').forEach(node => node.classList.toggle('is-active', node.dataset.purchaseType === type));
+    $('#familyArea').hidden = type !== 'family';
+    if (type === 'family' && !$$('.family-member').length) addFamilyMember();
+    updateTotal();
   }
 
   function updateTotal() {
@@ -346,8 +446,13 @@
       : 'Kursning to‘liq summasi bir martada to‘lanadi.';
   }
 
-  function eligibilityFields() {
-    return `<div class="eligibility-fields"><label class="field">Qo‘shimcha chegirma<select name="eligibility_category"><option value="">Toifaga kirmayman</option><option value="pensioner">Pensioner</option><option value="disability">Nogironligi bor</option><option value="student">Talaba</option></select></label><label class="field eligibility-file" hidden>Tasdiqlovchi hujjat<input type="file" name="eligibility_file" accept=".pdf,.jpg,.jpeg,.png"><small>PDF, JPG yoki PNG, 5 MB gacha. Hujjat asosida 100 000 so‘mgacha chegirma.</small></label></div>`;
+  function eligibilityFields(documentInfo = null) {
+    const options = [['', 'Toifaga kirmayman'], ['pensioner', 'Pensioner'], ['disability', 'Nogironligi bor'], ['student', 'Talaba']];
+    const existing = documentInfo ? ` data-existing-proof-id="${documentInfo.id}" data-existing-category="${escapeHtml(documentInfo.category)}"` : '';
+    const hint = documentInfo
+      ? `Yuklangan hujjat: ${escapeHtml(documentInfo.name)}. Almashtirish uchun yangi fayl tanlang.`
+      : 'PDF, JPG yoki PNG, 5 MB gacha. Hujjat asosida 100 000 so‘mgacha chegirma.';
+    return `<div class="eligibility-fields"${existing}><label class="field">Qo‘shimcha chegirma<select name="eligibility_category">${options.map(([value, label]) => `<option value="${value}"${documentInfo?.category === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label><label class="field eligibility-file"${documentInfo ? '' : ' hidden'}>Tasdiqlovchi hujjat<input type="file" name="eligibility_file" accept=".pdf,.jpg,.jpeg,.png"><small>${hint}</small></label></div>`;
   }
 
   function bindEligibility(node) {
@@ -362,6 +467,9 @@
     const category = $('[name="eligibility_category"]', node).value;
     if (!category) return null;
     const file = $('[name="eligibility_file"]', node).files[0];
+    const existing = $('.eligibility-fields', node)?.dataset || {};
+    // A document already saved in the cart is reused unless it is replaced.
+    if (!file && existing.existingProofId && existing.existingCategory === category) return Number(existing.existingProofId);
     if (!file || file.size > 5 * 1024 * 1024) throw new Error('Chegirma uchun 5 MB gacha tasdiqlovchi hujjat yuboring.');
     const key = `${category}:${phone}:${file.name}:${file.size}:${file.lastModified}`;
     if (node.dataset.proofKey === key) return Number(node.dataset.proofId);
@@ -371,19 +479,24 @@
     return result.id;
   }
 
-  function addFamilyMember() {
+  function addFamilyMember(member = {}) {
     if ($$('.family-member').length >= 7) return toast('Ko‘pi bilan 7 ta oila a’zosi qo‘shiladi.', true);
     const number = $$('.family-member').length + 1;
     const node = document.createElement('div'); node.className = 'family-member';
     node.innerHTML = `<div class="family-member__number">${number}-oila a’zosi</div><button class="remove-member" type="button" aria-label="O‘chirish">×</button><div class="field"><label>To‘liq ism</label><input name="full_name" autocomplete="name" placeholder="Ism Familiya" required></div><div class="field"><label>Telefon raqami</label><input name="phone_number" type="tel" autocomplete="tel" placeholder="+998 90 123 45 67" required></div>`;
-    node.insertAdjacentHTML('beforeend', eligibilityFields()); bindEligibility(node);
-    $('.remove-member', node).addEventListener('click', () => { node.remove(); renumberMembers(); updateTotal(); });
+    $('[name="full_name"]', node).value = member.full_name || '';
+    $('[name="phone_number"]', node).value = member.phone_number || '';
+    node.insertAdjacentHTML('beforeend', eligibilityFields(member.eligibility_document)); bindEligibility(node);
+    $('.remove-member', node).addEventListener('click', () => {
+      node.remove(); renumberMembers();
+      if (!$$('.family-member').length) setPurchaseType('self'); else updateTotal();
+    });
     $('#familyMembers').append(node); updateTotal();
   }
 
   function renumberMembers() { $$('.family-member__number').forEach((node, index) => { node.textContent = `${index + 1}-oila a’zosi`; }); }
 
-  async function createPurchase() {
+  async function saveCartItem() {
     const button = $('#continueToPayment');
     const memberNodes = state.type === 'family' ? $$('.family-member') : [];
     const members = memberNodes.map(node => ({ full_name: $('[name="full_name"]', node).value.trim(), phone_number: $('[name="phone_number"]', node).value.trim() }));
@@ -393,9 +506,161 @@
     try {
       const eligibility_document_id = await uploadProof($('#selfEligibility'), state.profile.phone_number);
       for (let index = 0; index < members.length; index++) members[index].eligibility_document_id = await uploadProof(memberNodes[index], members[index].phone_number);
-      const data = await api('/telegram-app/api/purchases/',  { method: 'POST', body: JSON.stringify({ course_id: state.course.id, purchase_type: state.type, members, eligibility_document_id, payment_mode: $('#paymentMode').value }) });
-      state.purchase = data.purchase; state.purchases.unshift(data.purchase); renderHistory(); openContract(data.purchase);
+      const data = await api('/telegram-app/api/cart/', { method: 'POST', body: JSON.stringify({
+        course_id: state.course.id, group_id: state.config.groupId, purchase_type: state.type, members,
+        eligibility_document_id, payment_mode: $('#paymentMode').value,
+      }) });
+      state.cartSelection.add(data.item_id);
+      setCart(data.cart);
+      toast(state.config.item ? 'Savat yangilandi.' : 'Kurs savatga qo‘shildi.');
+      openCart();
     } catch (error) { toast(error.message, true); } finally { button.disabled = false; }
+  }
+
+  // ---- Cart: items never expire; checkout turns the selection into purchases.
+
+  function setCart(cart) {
+    state.cart = cart;
+    const ids = new Set(cart.map(item => item.id));
+    cart.forEach(item => {
+      if (!state.knownCartIds.has(item.id) && item.status === 'ready') state.cartSelection.add(item.id);
+      if (item.status !== 'ready') state.cartSelection.delete(item.id);
+    });
+    state.cartSelection.forEach(id => { if (!ids.has(id)) state.cartSelection.delete(id); });
+    state.knownCartIds = ids;
+    renderCart();
+    renderCourses();
+    const count = cart.length;
+    $('#cartBadge').hidden = !count; $('#cartBadge').textContent = count;
+    $('#openCartFromHome').hidden = !count;
+    $('#homeCartSummary').textContent = `${count} ta kurs rasmiylashtirishni kutmoqda`;
+  }
+
+  const selectedCartItems = () => state.cart.filter(item => item.status === 'ready' && state.cartSelection.has(item.id));
+
+  function renderCart() {
+    const host = $('#cartList');
+    $('#cartCount').textContent = `${state.cart.length} ta`;
+    $('#cartToolbar').hidden = !state.cart.length;
+    $('#cartFooter').hidden = !state.cart.length;
+    if (!state.cart.length) {
+      host.innerHTML = `<article class="cart-empty"><span class="cart-empty__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 4h2l2.4 11.2a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.1L21 8H6.2"/><circle cx="9.5" cy="20" r="1.2"/><circle cx="17" cy="20" r="1.2"/></svg></span><h3>Savat hozircha bo‘sh</h3><p>O‘qimoqchi bo‘lgan kurslaringizni savatga qo‘shing. Ular shu yerda saqlanib turadi.</p><button type="button" class="primary-button" id="cartBrowseCourses">Kurslarni ko‘rish</button></article>`;
+      $('#cartBrowseCourses').addEventListener('click', showCourses);
+      return;
+    }
+    host.innerHTML = state.cart.map(item => {
+      const ready = item.status === 'ready';
+      const selected = ready && state.cartSelection.has(item.id);
+      const family = item.members.map(member => escapeHtml(member.full_name.split(' ')[0])).join(', ');
+      const discounts = Number(item.discount_total) + Number(item.social_discount_amount);
+      return `<article class="cart-item${selected ? ' is-selected' : ''}${ready ? '' : ' is-blocked'}">
+        <label class="cart-check"><input type="checkbox" data-cart-select="${item.id}" ${selected ? 'checked' : ''} ${ready ? '' : 'disabled'} aria-label="${escapeHtml(item.course)} kursini tanlash"><span aria-hidden="true"></span></label>
+        <div class="cart-item__body">
+          <div class="cart-item__top"><h3>${escapeHtml(item.course)}</h3><strong>${money(item.total_amount)}</strong></div>
+          <p class="cart-item__meta">${item.group ? `${formatDate(item.group.start_date)} · ${item.group.number_of_days} kun${item.group.teachers.length ? ` · ${escapeHtml(item.group.teachers.join(', '))}` : ''}` : 'Guruh tanlanmagan'}</p>
+          <div class="cart-item__chips"><span>${item.participant_count} kishi</span><span>${escapeHtml(item.purchase_type_label)}${family ? `: siz, ${family}` : ''}</span><span>${escapeHtml(item.payment_mode_label)}</span>${discounts > 0 ? `<span class="chip--discount">−${money(discounts)}</span>` : ''}</div>
+          ${item.status_message ? `<p class="cart-item__warning">${escapeHtml(item.status_message)}</p>` : ''}
+          <div class="cart-item__actions">
+            ${item.status === 'course_unavailable' ? '' : `<button type="button" data-cart-edit="${item.course_id}">${item.status === 'ready' ? 'Tahrirlash' : 'Yangilash'}</button>`}
+            <button type="button" class="is-danger" data-cart-remove="${item.id}">O‘chirish</button>
+          </div>
+        </div>
+      </article>`;
+    }).join('');
+    $$('[data-cart-select]', host).forEach(input => input.addEventListener('change', () => {
+      const id = Number(input.dataset.cartSelect);
+      if (input.checked) state.cartSelection.add(id); else state.cartSelection.delete(id);
+      renderCart();
+    }));
+    $$('[data-cart-edit]', host).forEach(button => button.addEventListener('click', () => startCheckout(Number(button.dataset.cartEdit), 'cartView')));
+    $$('[data-cart-remove]', host).forEach(button => button.addEventListener('click', () => removeCartItem(Number(button.dataset.cartRemove))));
+    renderCartSummary();
+  }
+
+  function renderCartSummary() {
+    const selected = selectedCartItems();
+    const ready = state.cart.filter(item => item.status === 'ready');
+    const total = selected.reduce((sum, item) => sum + Number(item.total_amount), 0);
+    const discount = selected.reduce((sum, item) => sum + Number(item.discount_total) + Number(item.social_discount_amount), 0);
+    const selectAll = $('#selectAllCart');
+    selectAll.checked = Boolean(ready.length) && selected.length === ready.length;
+    selectAll.indeterminate = Boolean(selected.length) && selected.length < ready.length;
+    selectAll.disabled = !ready.length;
+    $('#cartSelectionInfo').textContent = `${selected.length} / ${state.cart.length} tanlandi`;
+    $('#cartSelectedLabel').textContent = `Tanlangan: ${selected.length} ta kurs`;
+    $('#cartTotal').textContent = money(total);
+    $('#cartDiscountLabel').hidden = !discount;
+    $('#cartDiscountLabel').textContent = discount ? `Chegirmalar: −${money(discount)}` : '';
+    $('#checkoutButton').disabled = !selected.length;
+  }
+
+  async function removeCartItem(id) {
+    const item = state.cart.find(entry => entry.id === id);
+    if (!item || !(await confirmAction(`«${item.course}» savatdan o‘chirilsinmi?`))) return;
+    try {
+      const data = await api(`/telegram-app/api/cart/${id}/remove/`, { method: 'POST', body: '{}' });
+      setCart(data.cart);
+      toast('Kurs savatdan o‘chirildi.');
+    } catch (error) { toast(error.message, true); }
+  }
+
+  async function checkoutCart() {
+    const items = selectedCartItems();
+    if (!items.length) return toast('To‘lov uchun kamida bitta kursni tanlang.', true);
+    const button = $('#checkoutButton'); button.disabled = true; button.textContent = 'Tayyorlanmoqda…';
+    try {
+      const data = await api('/telegram-app/api/cart/checkout/', { method: 'POST', body: JSON.stringify({ item_ids: items.map(item => item.id) }) });
+      data.purchases.slice().reverse().forEach(replacePurchase);
+      state.batch = data.purchases.map(purchase => purchase.id);
+      setCart(data.cart);
+      await openBatchContract(data.purchases);
+    } catch (error) { toast(error.message, true); } finally { button.textContent = 'Rasmiylashtirish →'; renderCartSummary(); }
+  }
+
+  function openCart() {
+    renderCart();
+    renderHistory();
+    showView('cartView', 1);
+    setMainNav('cart');
+  }
+
+  async function returnToCart(id) {
+    if (!(await confirmAction('Kurs savatga qaytarilsinmi? Shartnoma va to‘lov keyinroq qayta rasmiylashtiriladi.'))) return;
+    try {
+      const data = await api(`/telegram-app/api/purchases/${id}/return-to-cart/`, { method: 'POST', body: '{}' });
+      state.purchases = state.purchases.filter(item => item.id !== id);
+      state.batch = state.batch.filter(item => item !== id);
+      setCart(data.cart);
+      renderHistory();
+      toast('Kurs savatga qaytarildi.');
+    } catch (error) { toast(error.message, true); }
+  }
+
+  // ---- Courses of one checkout are paid one after another.
+
+  function nextBatchPurchase() {
+    return state.batch.map(id => state.purchases.find(item => item.id === id))
+      .find(item => item && item.id !== state.purchase?.id && ['pending', 'failed'].includes(item.payment_status) && !Number(item.paid_amount));
+  }
+
+  function renderBatchProgress(purchase) {
+    const host = $('#batchProgress');
+    const items = state.batch.map(id => state.purchases.find(item => item.id === id)).filter(Boolean);
+    host.hidden = items.length < 2 || !state.batch.includes(purchase.id);
+    if (host.hidden) return;
+    host.innerHTML = `<small>${state.batch.indexOf(purchase.id) + 1} / ${items.length} kurs</small>${items.map(item => {
+      const tone = item.id === purchase.id ? 'current' : ['partial', 'success'].includes(item.payment_status) ? 'paid' : 'waiting';
+      return `<span class="batch-progress__item batch-progress__item--${tone}">${escapeHtml(item.course)}</span>`;
+    }).join('')}`;
+  }
+
+  function payNextInBatch() {
+    const next = nextBatchPurchase();
+    if (!next) return goHome();
+    state.purchase = next;
+    if (!next.contract_accepted) return openContract(next);
+    renderPayment();
+    showView('paymentView', 2);
   }
 
   function renderPayment() {
@@ -440,6 +705,7 @@
     $('#checkPayment').hidden = demo || !p.invoice_state;
     $('#payButton').textContent = p.checkout_url ? 'To‘lov sahifasini ochish' : 'To‘lovni amalga oshirish';
     $('#bookingQuestionnaire').hidden = !['partial', 'success'].includes(p.payment_status) || p.questionnaire_completed;
+    renderBatchProgress(p);
   }
 
   async function acceptTerms() {
@@ -463,12 +729,22 @@
     if (state.legalReadOnly) return showView(state.legalReturnView, 1);
     const button = $('#acceptContract'); button.disabled = true; button.textContent = 'Saqlanmoqda…';
     try {
-      const data = await api(`/telegram-app/api/purchases/${state.purchase.id}/contract/accept/`, {
-        method: 'POST',
-        body: JSON.stringify({ accepted: true, version: state.legal.version }),
-      });
-      state.purchase = data.purchase;
-      replacePurchase(data.purchase);
+      if (state.contractBatch) {
+        const data = await api('/telegram-app/api/purchases/contracts/accept/', {
+          method: 'POST',
+          body: JSON.stringify({ accepted: true, purchase_ids: state.contractBatch.ids, versions: state.contractBatch.versions }),
+        });
+        data.purchases.forEach(replacePurchase);
+        state.contractBatch = null;
+        state.purchase = data.purchases[0];
+      } else {
+        const data = await api(`/telegram-app/api/purchases/${state.purchase.id}/contract/accept/`, {
+          method: 'POST',
+          body: JSON.stringify({ accepted: true, version: state.legal.version }),
+        });
+        state.purchase = data.purchase;
+        replacePurchase(data.purchase);
+      }
       renderPayment();
       showView('paymentView', 2);
       toast('Shartnoma qabul qilindi. Endi to‘lovni amalga oshirishingiz mumkin.');
@@ -485,6 +761,9 @@
       $('#paymentResultPaid').textContent = money(purchase.paid_amount);
       $('#paymentResultDebt').textContent = money(purchase.remaining_amount);
       $('#paymentResultNote').textContent = Number(purchase.remaining_amount) > 0 ? 'Bron qabul qilindi. Qolgan summani keyinroq to‘lashingiz mumkin.' : 'Kurs uchun to‘lov to‘liq yakunlandi.';
+      const next = nextBatchPurchase();
+      $('#nextBatchAfterPayment').hidden = !next;
+      if (next) $('#nextBatchAfterPayment').textContent = `Keyingi kurs: ${next.course} →`;
       showView('paymentResultView', 2);
   }
 
@@ -545,7 +824,7 @@
 
   function renderQuestionnaires() {
     $('#questionnaireMembers').innerHTML = state.purchase.members.map((member, index) => `
-      <article class="questionnaire-card" data-member-id="${member.id}"><h3>${escapeHtml(member.full_name)}</h3><p>${index === 0 ? 'Xaridor' : 'Oila a’zosi'} · ${escapeHtml(member.phone_number)}</p>
+      <article class="questionnaire-card" data-member-id="${member.id}" data-phone="${escapeHtml(member.phone_number)}"><h3>${escapeHtml(member.full_name)}</h3><p>${index === 0 ? 'Xaridor' : 'Oila a’zosi'} · ${escapeHtml(member.phone_number)}</p>
         <div class="field"><label>Tug‘ilgan sana *</label><input type="date" name="birth_date" required></div>
         <div class="field"><label>Shahar / tuman *</label><input name="city" placeholder="Masalan: Toshkent, Chilonzor" required></div>
         <div class="field"><label>Kasb / faoliyat</label><input name="occupation" placeholder="Faoliyatingiz"></div>
@@ -554,6 +833,11 @@
         <div class="field"><label>Muhim sog‘liq izohlari</label><textarea name="health_notes" placeholder="Bilishimiz kerak bo‘lgan ma’lumot (ixtiyoriy)"></textarea></div>
         <label class="consent"><input type="checkbox" name="consent" required><span>Ma’lumotlar to‘g‘ri ekanini tasdiqlayman va ulardan kursni tashkil etish uchun foydalanishga roziman.</span></label>
       </article>`).join('');
+    $$('.questionnaire-card').forEach(card => {
+      const answer = state.answers[card.dataset.phone];
+      if (!answer) return;
+      ['birth_date', 'city', 'occupation', 'learning_goal', 'prior_experience', 'health_notes'].forEach(name => { $(`[name="${name}"]`, card).value = answer[name] || ''; });
+    });
   }
 
   async function submitQuestionnaire(event) {
@@ -561,6 +845,7 @@
     if (!event.currentTarget.reportValidity()) return;
     const button = $('button[type="submit"]', event.currentTarget); button.disabled = true;
     const responses = $$('.questionnaire-card').map(card => ({ member_id: Number(card.dataset.memberId), birth_date: $('[name="birth_date"]', card).value, city: $('[name="city"]', card).value.trim(), occupation: $('[name="occupation"]', card).value.trim(), learning_goal: $('[name="learning_goal"]', card).value.trim(), prior_experience: $('[name="prior_experience"]', card).value.trim(), health_notes: $('[name="health_notes"]', card).value.trim(), consent: $('[name="consent"]', card).checked }));
+    $$('.questionnaire-card').forEach((card, index) => { state.answers[card.dataset.phone] = responses[index]; });
     try {
       const data = await api(`/telegram-app/api/purchases/${state.purchase.id}/questionnaire/`, { method: 'POST', body: JSON.stringify({ responses }) });
       state.purchase = data.purchase; replacePurchase(data.purchase); showSuccess(data.purchase);
@@ -578,6 +863,9 @@
     $('#successDescription').textContent = purchase.payment_status === 'partial'
       ? `Bron va anketa qabul qilindi. Qolgan to‘lov: ${money(purchase.payable_amount)}. Bosh sahifadagi xarid orqali keyinroq to‘lashingiz mumkin.`
       : 'To‘lov va anketa qabul qilindi. Keyingi ma’lumotlarni Telegram orqali yuboramiz.';
+    const next = nextBatchPurchase();
+    $('#nextBatchAfterSuccess').hidden = !next;
+    if (next) $('#nextBatchAfterSuccess').textContent = `Keyingi kurs: ${next.course} →`;
     showView('successView', 3);
   }
 
@@ -593,7 +881,7 @@
   async function bootstrap() {
     try {
       const data = await api('/telegram-app/api/bootstrap/'); Object.assign(state, { profile: data.profile, courses: data.courses, myCourses: data.my_courses || [], purchases: data.purchases });
-      renderProfile(); renderLearningOverview(); renderMyCourses(); renderCourses(); renderHistory();
+      renderProfile(); renderLearningOverview(); renderMyCourses(); setCart(data.cart || []); renderHistory();
       if (data.legal.terms_required) openTerms(true);
       else {
         let attempt;
@@ -611,20 +899,28 @@
     }
   }
 
-  $$('.segment__item').forEach(button => button.addEventListener('click', () => { state.type = button.dataset.purchaseType; $$('.segment__item').forEach(node => node.classList.toggle('is-active', node === button)); $('#familyArea').hidden = state.type !== 'family'; if (state.type === 'family' && !$$('.family-member').length) addFamilyMember(); updateTotal(); }));
+  $$('.segment__item').forEach(button => button.addEventListener('click', () => setPurchaseType(button.dataset.purchaseType)));
   $('#paymentMode').addEventListener('change', updateTotal);
   $('#payRemaining').addEventListener('click', () => { $('#installmentAmount').value = state.purchase.payable_amount; });
   $('#bookingQuestionnaire').addEventListener('click', () => { renderQuestionnaires(); showView('questionnaireView', 3); });
   $('#continueAfterPayment').addEventListener('click', () => { if (state.purchase.questionnaire_completed) showSuccess(state.purchase); else { renderQuestionnaires(); showView('questionnaireView', 3); } });
-  $('#addFamilyMember').addEventListener('click', addFamilyMember); $('#continueToPayment').addEventListener('click', createPurchase); $('#payButton').addEventListener('click', startPayment); $('#questionnaireForm').addEventListener('submit', submitQuestionnaire);
+  $('#addFamilyMember').addEventListener('click', () => addFamilyMember()); $('#continueToPayment').addEventListener('click', saveCartItem);
+  $('#checkoutButton').addEventListener('click', checkoutCart); $('#openCartFromHome').addEventListener('click', openCart);
+  $('#nextBatchAfterPayment').addEventListener('click', payNextInBatch); $('#nextBatchAfterSuccess').addEventListener('click', payNextInBatch);
+  $('#selectAllCart').addEventListener('change', event => {
+    state.cart.filter(item => item.status === 'ready').forEach(item => { if (event.target.checked) state.cartSelection.add(item.id); else state.cartSelection.delete(item.id); });
+    renderCart();
+  }); $('#payButton').addEventListener('click', startPayment); $('#questionnaireForm').addEventListener('submit', submitQuestionnaire);
   $('#acceptTerms').addEventListener('click', acceptTerms); $('#acceptContract').addEventListener('click', acceptContract);
   $('#viewTerms').addEventListener('click', () => openTerms(false)); $('#viewContract').addEventListener('click', () => openContract(state.purchase, true));
   $('#heroCoursesButton').addEventListener('click', showCourses); $('#openCoursesFromHome').addEventListener('click', showCourses); $('#courseDetailBack').addEventListener('click', showCourses);
-  $('#contractBack').addEventListener('click', goHome); $('#checkoutBack').addEventListener('click', goHome); $('#paymentBack').addEventListener('click', () => state.purchase ? goHome() : showView('checkoutView', 1));
+  $('#contractBack').addEventListener('click', openCart); $('#paymentBack').addEventListener('click', openCart);
+  $('#checkoutBack').addEventListener('click', () => (state.config?.returnView === 'cartView' ? openCart() : showCourses()));
   $('#profileButton').addEventListener('click', () => { showView('profileView', 1); setMainNav('profile'); }); $$('[data-go-home]').forEach(node => node.addEventListener('click', goHome));
   $$('[data-nav]').forEach(button => button.addEventListener('click', () => {
     if (button.dataset.nav === 'profile') { showView('profileView', 1); setMainNav('profile'); }
     else if (button.dataset.nav === 'courses') showCourses();
+    else if (button.dataset.nav === 'cart') openCart();
     else goHome();
   }));
   $('#checkPayment').addEventListener('click', () => checkPayment(true));

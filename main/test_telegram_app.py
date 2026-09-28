@@ -222,7 +222,9 @@ class TelegramMiniAppTests(TestCase):
         final_bootstrap = self.client.get(reverse('main:telegram_app_bootstrap'), **self.headers)
         self.assertFalse(final_bootstrap.json()['legal']['terms_required'])
         self.assertTrue(final_bootstrap.json()['purchases'][0]['contract_accepted'])
-        self.assertEqual(final_bootstrap.json()['my_courses'][0]['assignment_status'], 'awaiting_group')
+        # The purchase is written to the nearest group, so attendance is available at once.
+        self.assertEqual(final_bootstrap.json()['my_courses'][0]['assignment_status'], 'assigned')
+        self.assertEqual(final_bootstrap.json()['my_courses'][0]['group_id'], self.group.id)
 
     def test_catalogue_only_lists_courses_with_active_groups(self):
         inactive_course = Course.objects.create(

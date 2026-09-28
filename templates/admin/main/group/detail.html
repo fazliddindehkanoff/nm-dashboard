@@ -57,10 +57,10 @@
     {% endif %}
 
     <!-- Guruh ma'lumotlari -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
         <div class="bg-white flex flex-col gap-1 overflow-hidden p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
             <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Kurs" %}</p>
-            <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark">{{ group.course.name }}</div>
+            <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark break-words">{{ group.course.name }}</div>
         </div>
         <div class="bg-white flex flex-col gap-1 overflow-hidden p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
             <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "O'qituvchilar" %}</p>
@@ -75,6 +75,10 @@
         <div class="bg-white flex flex-col gap-1 overflow-hidden p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
             <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Dars kunlari" %}</p>
             <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark">{{ group.number_of_days }} {% trans "kun" %}</div>
+        </div>
+        <div class="bg-white flex flex-col gap-1 overflow-hidden p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
+            <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Ishtirokchilar" %}</p>
+            <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark">{{ participants_count }} {% trans "kishi" %}</div>
         </div>
         <div class="bg-white flex flex-col gap-1 overflow-hidden p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
             <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Holati" %}</p>
@@ -113,6 +117,15 @@
     </nav>
 
     {% if active_tab == 'payments' %}
+    {% if unassigned_web_payments %}
+    <a href="{{ unassigned_web_payments_url }}" class="flex items-center gap-3 border border-base-200 dark:border-base-800 bg-white dark:bg-base-900 rounded-default px-5 py-4 text-sm hover:bg-base-50" style="border-left: 4px solid #f59e0b;">
+        <span class="material-symbols-outlined" style="color: #d97706; font-size: 20px;" aria-hidden="true">warning</span>
+        <span class="grow text-base-700 dark:text-base-300">
+            {% blocktrans count counter=unassigned_web_payments %}Bu kurs bo'yicha {{ counter }} ta web app to'lovi hali guruhga biriktirilmagan.{% plural %}Bu kurs bo'yicha {{ counter }} ta web app to'lovi hali guruhga biriktirilmagan.{% endblocktrans %}
+        </span>
+        <span class="font-medium whitespace-nowrap text-primary-700 dark:text-primary-400">{% trans "Biriktirish" %} →</span>
+    </a>
+    {% endif %}
     <!-- To'lovlar jadvali -->
     <div class="bg-white block flex flex-col grow overflow-hidden relative rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
         <div class="border-b border-base-200 flex flex-row items-center justify-between py-4 px-6 dark:border-base-800">
@@ -137,7 +150,13 @@
                         <td class="py-3 px-6 text-font-important-light dark:text-font-important-dark">
                             <a href="{% url 'admin:main_transaction_change' tx.pk %}" class="text-base-700 dark:text-base-300 hover:underline">{% for c in tx.clients.all %}{{ c.full_name }}{% if not forloop.last %}, {% endif %}{% endfor %}</a>
                         </td>
-                        <td class="py-3 px-6">{{ tx.operator.full_name|default:"—" }}</td>
+                        <td class="py-3 px-6">
+                            {% if tx.mini_app_purchase_id %}
+                            <span class="inline-flex items-center gap-1 font-medium px-2 py-0.5 rounded-default text-xs whitespace-nowrap" style="background: #e0f7f9; color: #0b6f7c;">
+                                <span class="material-symbols-outlined" style="font-size: 14px;" aria-hidden="true">smartphone</span>{% trans "Web app" %}
+                            </span>
+                            {% else %}{{ tx.operator.full_name|default:"—" }}{% endif %}
+                        </td>
                         <td class="py-3 px-6 text-right font-medium text-font-important-light dark:text-font-important-dark">{{ tx.amount|floatformat:0 }}</td>
                         <td class="py-3 px-6">{{ tx.get_payment_type_display }}</td>
                         <td class="py-3 px-6">
