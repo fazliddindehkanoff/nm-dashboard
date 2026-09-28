@@ -82,6 +82,37 @@ def telegram_api_request(method, **kwargs):
         return requests.post(API_BASE.format(token=token, method=method), **kwargs)
 
 
+class TelegramAPIError(Exception):
+    """Bot API refused a call; ``retryable`` is False for errors a retry cannot fix."""
+
+    def __init__(self, message, retryable=True):
+        super().__init__(message)
+        self.retryable = retryable
+
+
+def bot_api(method, **payload):
+    """Call a Bot API method and return its ``result`` or raise ``TelegramAPIError``."""
+    try:
+        response = telegram_api_request(method, json=payload, timeout=(2, 10))
+        data = response.json()
+    except requests.RequestException as exc:
+        raise TelegramAPIError(f"Telegram tarmoq xatosi: {exc}")
+    except ValueError:
+        raise TelegramAPIError(f"Telegram noto'g'ri javob qaytardi (HTTP {response.status_code}).")
+    if response.status_code == 200 and data.get("ok"):
+        return data.get("result")
+    retryable = response.status_code == 429 or response.status_code >= 500
+    raise TelegramAPIError(data.get("description") or f"HTTP {response.status_code}", retryable=retryable)
+
+
+def bot_user_id():
+    """The bot's own user ID is the numeric prefix of its token."""
+    try:
+        return int(_get_token().split(":", 1)[0])
+    except ValueError:
+        raise TelegramNotConfigured("TELEGRAM_BOT_TOKEN noto'g'ri ko'rinishda.")
+
+
 def send_bot_message(chat_id, text, reply_markup=None):
     """Send a plain bot message and return ``(ok, detail)``.
 

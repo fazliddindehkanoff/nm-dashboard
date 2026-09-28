@@ -9,6 +9,7 @@
 
 {% block content %}
 <div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-8">
+    {% if messages %}{% include "unfold/helpers/messages.html" %}{% endif %}
 
     <!-- Header: sarlavha + o'ng qo'l tepada actionlar -->
     <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -103,6 +104,11 @@
            class="px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors {% if active_tab == 'attendance' %}border-primary-600 text-primary-700 dark:text-primary-400{% else %}border-transparent text-base-500 hover:text-base-700 dark:hover:text-base-300{% endif %}"
            {% if active_tab == 'attendance' %}aria-current="page"{% endif %}>
             <span class="inline-flex items-center gap-2"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">fact_check</span>{% trans "Davomat" %}</span>
+        </a>
+        <a href="?tab=channel"
+           class="px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors {% if active_tab == 'channel' %}border-primary-600 text-primary-700 dark:text-primary-400{% else %}border-transparent text-base-500 hover:text-base-700 dark:hover:text-base-300{% endif %}"
+           {% if active_tab == 'channel' %}aria-current="page"{% endif %}>
+            <span class="inline-flex items-center gap-2"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">campaign</span>{% trans "Telegram kanal" %}</span>
         </a>
         <a href="?tab=anketa"
            class="px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors {% if active_tab == 'anketa' %}border-primary-600 text-primary-700 dark:text-primary-400{% else %}border-transparent text-base-500 hover:text-base-700 dark:hover:text-base-300{% endif %}"
@@ -446,6 +452,128 @@
             </div>
         </div>
     </dialog>
+    {% elif active_tab == 'channel' %}
+    {% if not group.telegram_channel_id %}
+    <div class="bg-white dark:bg-base-900 border border-dashed border-base-300 dark:border-base-700 rounded-default min-h-64 flex flex-col items-center justify-center text-center p-8">
+        <span class="material-symbols-outlined text-base-400 text-4xl" aria-hidden="true">campaign</span>
+        <h2 class="font-semibold text-font-important-light dark:text-font-important-dark mt-3">{% trans "Telegram kanal ulanmagan" %}</h2>
+        <p class="text-sm text-base-500 mt-1">{% trans "Tahrirlash oynasida «Telegram kanal ID» maydonini to'ldiring. Bot kanalda admin bo'lishi kerak." %}</p>
+        {% if has_change_permission %}
+        <a href="{{ change_url }}" class="mt-4 inline-flex items-center gap-2 bg-base-900 text-white dark:bg-base-100 dark:text-base-900 font-medium px-4 py-2 rounded-default text-sm">
+            <span class="material-symbols-outlined text-[18px]" aria-hidden="true">edit</span>{% trans "Kanalni ulash" %}
+        </a>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="flex flex-col sm:flex-row sm:items-center gap-3 border border-base-200 dark:border-base-800 bg-white dark:bg-base-900 rounded-default px-5 py-4 text-sm">
+        <span class="material-symbols-outlined" style="color: #0369a1; font-size: 20px;" aria-hidden="true">campaign</span>
+        <div class="grow">
+            <div class="font-medium text-font-important-light dark:text-font-important-dark">{{ group.telegram_channel_title|default:group.telegram_channel_id }} <span class="text-base-500 font-normal">({{ group.telegram_channel_id }})</span></div>
+            <div class="text-base-500">
+                {% if channel_deadline %}
+                {% blocktrans with deadline=channel_deadline|date:"d.m.Y H:i" %}To'lovni to'liq qilmaganlar {{ deadline }} da kanaldan chiqariladi va to'liq to'lagach qaytariladi.{% endblocktrans %}
+                {% else %}
+                {% trans "To'liq to'lov muddati belgilanmagan — hech kim kanaldan chiqarilmaydi." %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800 overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-base-200 dark:border-base-800 text-left text-xs uppercase text-base-500">
+                    <th class="py-3 px-4 font-medium">{% trans "Mijoz" %}</th>
+                    <th class="py-3 px-4 font-medium">{% trans "Holat" %}</th>
+                    <th class="py-3 px-4 font-medium text-right">{% trans "Qolgan to'lov" %}</th>
+                    <th class="py-3 px-4 font-medium">{% trans "Shaxsiy havola" %}</th>
+                    <th class="py-3 px-4 font-medium" style="min-width: 170px;">{% trans "Izoh" %}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in channel_rows %}
+                {% with member=row.member %}
+                <tr class="border-b border-base-200 dark:border-base-800 last:border-0 hover:bg-base-50 dark:hover:bg-base-800/50">
+                    <td class="py-3 px-4 whitespace-nowrap">
+                        <a href="{% url 'admin:main_client_detail' member.client_id %}" class="font-medium text-font-important-light dark:text-font-important-dark hover:underline">{{ member.client.full_name }}</a>
+                        <div class="text-xs text-base-500">{{ member.client.phone_number }}</div>
+                    </td>
+                    <td class="py-3 px-4">
+                        {% if member.status == 'joined' %}
+                        <span class="font-medium px-2 py-0.5 rounded-default text-xs whitespace-nowrap" style="background: #dcfce7; color: #166534;">{{ member.get_status_display }}</span>
+                        {% elif member.status == 'invited' %}
+                        <span class="font-medium px-2 py-0.5 rounded-default text-xs whitespace-nowrap" style="background: #e0f2fe; color: #075985;">{{ member.get_status_display }}</span>
+                        {% elif member.status == 'removed' %}
+                        <span class="font-medium px-2 py-0.5 rounded-default text-xs whitespace-nowrap" style="background: #fee2e2; color: #991b1b;">{{ member.get_status_display }}</span>
+                        {% else %}
+                        <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-default text-xs whitespace-nowrap">{{ member.get_status_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-right whitespace-nowrap {% if row.debt %}font-medium{% else %}text-base-500{% endif %}">{% if row.debt %}{{ row.debt|money }}{% else %}{% trans "To'langan" %}{% endif %}</td>
+                    <td class="py-3 px-4">
+                        {% if member.invite_link and member.status != 'removed' %}
+                        <div class="flex items-center gap-2">
+                            <input class="channel-link border border-base-200 bg-base-50 dark:bg-base-800 dark:border-base-700 text-base-600 dark:text-base-300" readonly aria-label="{{ member.client.full_name }} havolasi" value="{{ member.invite_link }}" onclick="this.select()">
+                            <button type="button" class="channel-copy border border-base-200 dark:border-base-700 text-base-700 dark:text-base-300 hover:bg-base-100 dark:hover:bg-base-800" data-copy="{{ member.invite_link }}" title="{% trans 'Nusxalash' %}" aria-label="{{ member.client.full_name }}: {% trans 'havolani nusxalash' %}">
+                                <span class="material-symbols-outlined" style="font-size: 16px;" aria-hidden="true" data-copy-icon>content_copy</span>
+                            </button>
+                            {% if member.status == 'invited' %}
+                            <form method="post" action="{% url 'admin:main_group_channel_resend' group.pk member.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="channel-copy border border-base-200 dark:border-base-700 text-base-700 dark:text-base-300 hover:bg-base-100 dark:hover:bg-base-800" title="{% trans 'Botda qayta yuborish' %}" aria-label="{{ member.client.full_name }}: {% trans 'havolani botda qayta yuborish' %}">
+                                    <span class="material-symbols-outlined" style="font-size: 16px;" aria-hidden="true">send</span>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                        {% else %}<span class="text-base-400">—</span>{% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-xs">
+                        {% if member.last_error %}
+                        <span style="color: #b45309;">{{ member.last_error }}</span>
+                        {% elif member.status == 'joined' %}
+                        <span class="text-base-500">{% trans "Kirdi" %}: <span class="whitespace-nowrap">{{ member.joined_at|date:"d.m.Y H:i" }}</span></span>
+                        {% elif member.status == 'removed' %}
+                        <span class="text-base-500">{% trans "Chiqarildi" %}: <span class="whitespace-nowrap">{{ member.removed_at|date:"d.m.Y H:i" }}</span></span>
+                        {% elif member.link_sent_at %}
+                        <span class="text-base-500">{% trans "Botda yuborildi" %}: <span class="whitespace-nowrap">{{ member.link_sent_at|date:"d.m.Y H:i" }}</span></span>
+                        {% else %}
+                        <span class="text-base-500">{% trans "Navbatda" %}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endwith %}
+                {% empty %}
+                <tr><td colspan="5" class="py-12 px-5 text-center text-base-500">{% trans "To'lovi tasdiqlangan mijozlar shu yerda paydo bo'ladi." %}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <style>
+        .channel-link { height: 34px; width: 170px; border-radius: 8px; padding: 0 10px; font-size: 13px; }
+        .channel-copy { height: 34px; min-width: 34px; justify-content: center; border-radius: 8px; padding: 0 8px; font-size: 13px; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+        .channel-copy.is-copied { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+    </style>
+    <script>
+    document.querySelectorAll('[data-copy]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            var icon = button.querySelector('[data-copy-icon]');
+            var done = function () {
+                button.classList.add('is-copied');
+                icon.textContent = 'check';
+                setTimeout(function () { button.classList.remove('is-copied'); icon.textContent = 'content_copy'; }, 1600);
+            };
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(button.dataset.copy).then(done);
+            } else {
+                button.parentElement.querySelector('input').select();
+                document.execCommand('copy');
+                done();
+            }
+        });
+    });
+    </script>
+    {% endif %}
     {% elif active_tab == 'anketa' %}
     <div class="bg-white dark:bg-base-900 border border-dashed border-base-300 dark:border-base-700 rounded-default min-h-64 flex flex-col items-center justify-center text-center p-8">
         <span class="material-symbols-outlined text-base-400 text-4xl" aria-hidden="true">assignment</span>

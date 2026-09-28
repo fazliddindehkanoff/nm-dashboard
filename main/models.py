@@ -94,6 +94,25 @@ class Group(models.Model):
         default=True,
         help_text=_("Faol bo'lmagan guruhlar yangi to'lovlarda ko'rsatilmaydi."),
     )
+    telegram_channel_id = models.CharField(
+        _("Telegram kanal ID"),
+        max_length=64,
+        blank=True,
+        help_text=_("Masalan -1001234567890 yoki @kanal_nomi. Bot kanalda admin bo'lishi shart."),
+    )
+    telegram_channel_title = models.CharField(
+        _("Telegram kanal nomi"), max_length=255, blank=True, editable=False,
+    )
+    channel_removal_days = models.PositiveSmallIntegerField(
+        _("To'liq to'lov muddati (kun)"),
+        null=True,
+        blank=True,
+        validators=(MaxValueValidator(365),),
+        help_text=_(
+            "Guruh boshlanganidan necha kun o'tgach to'lovni to'liq qilmaganlar kanaldan chiqariladi. "
+            "Bo'sh qoldirilsa, hech kim chiqarilmaydi."
+        ),
+    )
 
     class Meta:
         verbose_name = _("Guruh")
@@ -859,6 +878,50 @@ class TelegramUser(models.Model):
         return self.full_name or self.username or str(self.telegram_id)
 
 
+class TelegramChannelMember(models.Model):
+    """One client's access to their group's Telegram channel.
+
+    The worker compares the client's payment with the group rules whenever
+    ``next_sync_at`` is due and invites, removes or re-invites the client.
+    """
+
+    STATUS_NEW = 'new'
+    STATUS_INVITED = 'invited'
+    STATUS_JOINED = 'joined'
+    STATUS_REMOVED = 'removed'
+    STATUSES = (
+        (STATUS_NEW, _("Havola tayyorlanmoqda")),
+        (STATUS_INVITED, _("Havola berilgan")),
+        (STATUS_JOINED, _("Kanalda")),
+        (STATUS_REMOVED, _("Chiqarilgan")),
+    )
+
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='channel_members', verbose_name=_("Guruh"))
+    client = models.ForeignKey(
+        Client, on_delete=models.CASCADE, related_name='channel_memberships', verbose_name=_("Mijoz"),
+    )
+    status = models.CharField(_("Holat"), max_length=12, choices=STATUSES, default=STATUS_NEW)
+    invite_link = models.CharField(_("Shaxsiy havola"), max_length=255, blank=True)
+    telegram_id = models.BigIntegerField(_("Kanalga kirgan Telegram ID"), null=True, blank=True)
+    link_sent_at = models.DateTimeField(_("Havola yuborilgan vaqt"), null=True, blank=True)
+    joined_at = models.DateTimeField(_("Kanalga kirgan vaqt"), null=True, blank=True)
+    removed_at = models.DateTimeField(_("Chiqarilgan vaqt"), null=True, blank=True)
+    next_sync_at = models.DateTimeField(_("Keyingi tekshiruv"), null=True, blank=True, db_index=True)
+    last_error = models.CharField(_("Oxirgi xato"), max_length=255, blank=True)
+    created_at = models.DateTimeField(_("Yaratilgan vaqt"), auto_now_add=True)
+    updated_at = models.DateTimeField(_("Yangilangan vaqt"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("Kanal a'zosi")
+        verbose_name_plural = _("Kanal a'zolari")
+        constraints = [
+            models.UniqueConstraint(fields=('group', 'client'), name='uniq_channel_member_group_client'),
+        ]
+
+    def __str__(self):
+        return f"{self.client} — {self.group}"
+
+
 class TelegramCampaign(models.Model):
     AUDIENCE_READY = 'ready'
     AUDIENCE_ALL = 'all'
@@ -1484,6 +1547,8 @@ def _recalc_group_debt(client_id, group_id):
         models.Q(transaction__is_confirmed=False) | models.Q(transaction__is_refunded=True)
     ).exclude(debt=0).update(debt=0)
 
+    _schedule_channel_sync(client_id, group_id, has_payment=bool(rows))
+
     if not rows:
         return
 
@@ -1500,6 +1565,18 @@ def _recalc_group_debt(client_id, group_id):
         new_debt = remaining if r.pk == latest.pk else Decimal(0)
         if _dec(r.debt) != new_debt:
             TransactionClient.objects.filter(pk=r.pk).update(debt=new_debt)
+
+
+def _schedule_channel_sync(client_id, group_id, has_payment):
+    """Ask the Telegram worker to re-check a client's channel access after a payment change."""
+    if not Group.objects.filter(pk=group_id).exclude(telegram_channel_id='').exists():
+        return
+    now = timezone.now()
+    updated = TelegramChannelMember.objects.filter(group_id=group_id, client_id=client_id).update(next_sync_at=now)
+    if not updated and has_payment:
+        TelegramChannelMember.objects.get_or_create(
+            group_id=group_id, client_id=client_id, defaults={'next_sync_at': now},
+        )
 
 
 class EligibilityDocument(models.Model):

@@ -39,7 +39,7 @@ class Command(BaseCommand):
         if options['polling']:
             self._call('deleteWebhook', {'drop_pending_updates': False})
         else:
-            webhook_payload = {'url': webhook_url, 'allowed_updates': ['message']}
+            webhook_payload = {'url': webhook_url, 'allowed_updates': ['message', 'chat_join_request']}
             if telegram.get('WEBHOOK_SECRET'):
                 webhook_payload['secret_token'] = telegram['WEBHOOK_SECRET']
             self._call('setWebhook', webhook_payload)

@@ -52,7 +52,8 @@ from .services.mini_app import (
     save_cart_item,
     upcoming_groups_by_course,
 )
-from .services.telegram import TelegramNotConfigured, send_bot_message
+from .services.telegram import TelegramAPIError, TelegramNotConfigured, send_bot_message
+from .services.telegram_channels import handle_join_request, schedule_undelivered_links
 from .services.telegram_auth import TelegramAuthenticationError, telegram_user_from_request
 from .services.multicard import (
     InvalidCallback, MulticardError, MulticardNotConfigured,
@@ -120,6 +121,13 @@ def _send_onboarding_message(account, request):
 
 def process_telegram_update(update, request=None):
     """Process one update atomically so a polling retry cannot skip onboarding steps."""
+    if update.get('chat_join_request'):
+        try:
+            handle_join_request(update['chat_join_request'])
+        except TelegramAPIError as exc:
+            raise TelegramDeliveryError(str(exc), retryable=exc.retryable)
+        return
+
     message = update.get('message') or {}
     sender = message.get('from') or {}
     telegram_id = sender.get('id')
@@ -184,6 +192,8 @@ def process_telegram_update(update, request=None):
                 account.save(update_fields=(
                     'phone_number', 'client', 'onboarding_step', 'updated_at',
                 ))
+                if account.client_id:
+                    schedule_undelivered_links(account.client_id)
                 _send_onboarding_message(account, request)
         elif account.onboarding_step == TelegramUser.STEP_READY:
             _send_onboarding_message(account, request)

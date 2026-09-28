@@ -37,7 +37,7 @@ from .models import (
     AttendanceLesson, AttendanceRecord, Expense, RoleConfiguration, PaymentSettings,
     EligibilityDocument, EnrollmentQuestionnaire, LegalAcceptance, MiniAppCartItem, MiniAppCartMember,
     MiniAppPurchase, MiniAppPurchaseMember, MulticardInvoice,
-    TelegramCampaign, TelegramCampaignRecipient, TelegramUser,
+    TelegramCampaign, TelegramCampaignRecipient, TelegramChannelMember, TelegramUser,
     _recalc_transaction_participants, sub_transaction_shares,
 )
 from .permissions import is_operator
@@ -51,6 +51,7 @@ from .services.amocrm import (
 )
 from .services.telegram import send_payment_qr, TelegramNotConfigured
 from .services.telegram_campaigns import queue_campaign
+from .services.telegram_channels import ChannelSetupError, check_channel, refresh_group, removal_deadline, resend_link
 from .services.legal import contract_version, TERMS_VERSION
 from .services.mini_app import sync_group_payment
 from .templatetags.money import money
@@ -157,7 +158,23 @@ class GroupForm(forms.ModelForm):
         course = cleaned_data.get('course')
         if course and not cleaned_data.get('number_of_days'):
             cleaned_data['number_of_days'] = course.number_of_days
+        if not cleaned_data.get('telegram_channel_id') and 'telegram_channel_id' not in self.errors:
+            self.instance.telegram_channel_title = ''
+            if cleaned_data.get('channel_removal_days') is not None:
+                self.add_error('channel_removal_days', _("Avval Telegram kanal ID sini kiriting."))
         return cleaned_data
+
+    def clean_telegram_channel_id(self):
+        value = (self.cleaned_data.get('telegram_channel_id') or '').strip()
+        if not value or value == self.instance.telegram_channel_id:
+            return value
+        # The group is saved only if our bot can manage the channel.
+        try:
+            chat_id, title = check_channel(value)
+        except ChannelSetupError as exc:
+            raise forms.ValidationError(str(exc))
+        self.instance.telegram_channel_title = title
+        return chat_id
 
     def clean_teachers(self):
         teachers = self.cleaned_data.get('teachers')
@@ -192,7 +209,18 @@ class GroupAdmin(ModelAdmin):
     form = GroupForm
     change_form_template = 'admin/main/group/change_form.html'
     list_display = (
-        'group_link', 'start_date', 'number_of_days', 'participants_count', 'active_badge',
+        'group_link', 'start_date', 'number_of_days', 'participants_count', 'channel_badge', 'active_badge',
+    )
+    fieldsets = (
+        (None, {'fields': ('course', 'teachers', 'start_date', 'number_of_days', 'is_active', 'banner')}),
+        (_("Telegram kanal"), {
+            'fields': ('telegram_channel_id', 'channel_removal_days'),
+            'description': _(
+                "Botni kanalga admin qiling va «Invite users via link» hamda «Ban users» huquqlarini yoqing. "
+                "To'lov tasdiqlangan har bir mijozga bot shaxsiy havola yuboradi. Muddat o'tgach to'lovni "
+                "to'liq qilmaganlar kanaldan chiqariladi va to'liq to'lagach qaytariladi."
+            ),
+        }),
     )
     ordering = ('start_date', 'id')
     list_display_links = None
@@ -274,6 +302,27 @@ class GroupAdmin(ModelAdmin):
     def participants_count(self, obj):
         return obj._participants_count
 
+    @display(description=_("Telegram kanal"))
+    def channel_badge(self, obj):
+        if not obj.telegram_channel_id:
+            return "—"
+        return format_html(
+            '<span class="inline-flex items-center gap-1 font-medium px-2 py-0.5 rounded-default text-xs whitespace-nowrap"'
+            ' style="background: #e0f2fe; color: #075985;" title="{}">'
+            '<span class="material-symbols-outlined" style="font-size: 14px;" aria-hidden="true">campaign</span>{}</span>',
+            obj.telegram_channel_title or obj.telegram_channel_id,
+            _("Ulangan"),
+        )
+
+    def save_model(self, request, obj, form, change):
+        before = Group.objects.filter(pk=obj.pk).values(
+            'telegram_channel_id', 'channel_removal_days', 'start_date',
+        ).first() if change else None
+        super().save_model(request, obj, form, change)
+        after = {name: getattr(obj, name) for name in ('telegram_channel_id', 'channel_removal_days', 'start_date')}
+        if before != after and (obj.telegram_channel_id or (before and before['telegram_channel_id'])):
+            refresh_group(obj, channel_changed=bool(before) and before['telegram_channel_id'] != obj.telegram_channel_id)
+
     # ---- Guruh ustiga bosilganda o'zgartirish emas, detail sahifa ochiladi ----
     def get_urls(self):
         urls = super().get_urls()
@@ -298,6 +347,11 @@ class GroupAdmin(ModelAdmin):
                 "<path:object_id>/attendance/<int:record_id>/day/<int:day_index>/",
                 self.admin_site.admin_view(self.attendance_day_status_view),
                 name="%s_%s_attendance_day_status" % info,
+            ),
+            path(
+                "<path:object_id>/channel/<int:member_id>/resend/",
+                self.admin_site.admin_view(self.channel_resend_view),
+                name="%s_%s_channel_resend" % info,
             ),
             path(
                 "course/<int:course_id>/duration/",
@@ -346,8 +400,25 @@ class GroupAdmin(ModelAdmin):
         )
 
         active_tab = request.GET.get('tab', 'payments')
-        if active_tab not in {'payments', 'attendance', 'anketa', 'statistics'}:
+        if active_tab not in {'payments', 'attendance', 'channel', 'anketa', 'statistics'}:
             active_tab = 'payments'
+
+        channel_rows = []
+        if active_tab == 'channel':
+            channel_members = (
+                TelegramChannelMember.objects.filter(group=group).select_related('client')
+                .order_by('client__full_name', 'id')
+            )
+            if _is_plain_operator(request):
+                channel_members = channel_members.filter(client__operator=request.user.operator)
+            debts = dict(
+                TransactionClient.objects.filter(
+                    transaction__group=group, transaction__is_confirmed=True, transaction__is_refunded=False,
+                ).values('client_id').annotate(total=models.Sum('debt')).values_list('client_id', 'total')
+            )
+            channel_rows = [
+                {'member': member, 'debt': debts.get(member.client_id) or Decimal(0)} for member in channel_members
+            ]
 
         if active_tab == 'attendance':
             self._ensure_group_attendance_records(group)
@@ -401,6 +472,8 @@ class GroupAdmin(ModelAdmin):
             "active_tab": active_tab,
             "attendance_records": attendance_records,
             "attendance_rows": attendance_rows,
+            "channel_rows": channel_rows,
+            "channel_deadline": removal_deadline(group),
             "lesson_days": lesson_days,
             "attendance_statuses": AttendanceRecord.STATUSES,
             "lesson_statuses": AttendanceLesson.STATUSES,
@@ -414,6 +487,26 @@ class GroupAdmin(ModelAdmin):
             "has_delete_permission": self.has_delete_permission(request, group),
         }
         return TemplateResponse(request, "admin/main/group/detail.html", context)
+
+    def channel_resend_view(self, request, object_id, member_id):
+        if request.method != 'POST':
+            return redirect('admin:main_group_detail', object_id)
+        group = self.get_object(request, object_id)
+        if group is None or not self.has_view_permission(request, group):
+            raise PermissionDenied
+        members = TelegramChannelMember.objects.filter(pk=member_id, group=group)
+        if _is_plain_operator(request):
+            members = members.filter(client__operator=request.user.operator)
+        member = members.select_related('client').first()
+        if member is None:
+            self.message_user(request, _("Kanal a'zosi topilmadi."), messages.ERROR)
+        else:
+            resend_link(member)
+            self.message_user(
+                request, _("%(name)s uchun kanal holati bir necha soniyada qayta tekshiriladi.") % {'name': member.client.full_name},
+                messages.SUCCESS,
+            )
+        return redirect(reverse('admin:main_group_detail', args=[group.pk]) + '?tab=channel')
 
     def course_duration_view(self, request, course_id):
         if not (self.has_add_permission(request) or self.has_change_permission(request)):

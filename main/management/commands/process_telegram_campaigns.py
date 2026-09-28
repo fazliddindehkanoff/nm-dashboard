@@ -31,7 +31,9 @@ class Command(BaseCommand):
         while not self._stop:
             try:
                 from main.services.payment_notifications import process_payment_notifications
+                from main.services.telegram_channels import process_due_members
                 process_payment_notifications()
+                process_due_members()
                 campaign = next_campaign()
                 if campaign:
                     process_campaign(campaign)

@@ -62,7 +62,7 @@ class Command(BaseCommand):
         while not self._stop:
             payload = {
                 'timeout': poll_timeout,
-                'allowed_updates': ['message'],
+                'allowed_updates': ['message', 'chat_join_request'],
             }
             if offset is not None:
                 payload['offset'] = offset
