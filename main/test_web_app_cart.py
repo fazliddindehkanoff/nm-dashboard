@@ -266,8 +266,8 @@ class WebAppGroupPaymentTests(TestCase):
         row = next(row for row in self.client.get(reverse('main:referrals')).context['rows'] if row['name'] == 'Seller')
         self.assertEqual((row['sales'], row['sales_amount'], row['paid']), (1, Decimal('2600000'), Decimal('200000')))
         listing = self.client.get(reverse('admin:main_miniapppurchase_changelist'))
-        self.assertContains(listing, 'Sotuv summasi')
-        self.assertContains(listing, '2600000')
+        self.assertContains(listing, 'Sotuv (so')
+        self.assertContains(listing, '2 600 000')
 
     def test_payments_page_lists_a_web_app_payment_once(self):
         self.pay('200000')

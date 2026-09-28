@@ -1,5 +1,5 @@
 {% extends 'unfold/layouts/base.html' %}
-{% load i18n unfold %}
+{% load money i18n unfold %}
 
 {% block breadcrumbs %}{% endblock %}
 
@@ -8,8 +8,6 @@
 {% endblock %}
 
 {% block content %}
-{% if eligibility_documents %}<section class="p-6 border rounded mb-6"><h2 class="font-semibold">Ijtimoiy chegirma hujjatlari</h2>
-{% for document in eligibility_documents %}<p><a class="text-primary-600 underline" href="{% url 'main:eligibility_document' document.id %}">{{ document.get_category_display }} — {{ document.original_name }}</a> · {{ document.created_at }}</p>{% endfor %}</section>{% endif %}
 <div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-8">
 
     <!-- Header: sarlavha + o'ng qo'l tepada actionlar -->
@@ -61,10 +59,28 @@
         <div class="bg-white flex flex-col gap-1 overflow-hidden p-5 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800 border border-base-200">
             <p class="leading-relaxed mb-0 text-xs uppercase tracking-wider text-base-500">{% trans "Qarzi" %}</p>
             <div class="font-semibold text-base text-font-important-light dark:text-font-important-dark">
-                {{ loan_amount|floatformat:0 }} <span class="text-xs font-normal text-base-500">UZS</span>
+                {{ loan_amount|money }} <span class="text-xs font-normal text-base-500">UZS</span>
             </div>
         </div>
     </div>
+
+    {% if eligibility_documents %}
+    <section class="bg-white dark:bg-base-900 border border-base-200 dark:border-base-800 rounded-default shadow-xs">
+        <div class="border-b border-base-200 dark:border-base-800 px-6 py-4 flex items-center gap-2">
+            <span class="material-symbols-outlined text-base-500" aria-hidden="true">badge</span>
+            <h2 class="font-semibold text-important">{% trans "Ijtimoiy chegirma hujjatlari" %}</h2>
+        </div>
+        <ul class="divide-y divide-base-200 dark:divide-base-800">
+            {% for document in eligibility_documents %}
+            <li class="px-6 py-3 flex items-center gap-3 text-sm">
+                <span class="font-medium text-font-important-light dark:text-font-important-dark">{{ document.get_category_display }}</span>
+                <a class="text-primary-600 dark:text-primary-400 hover:underline truncate" href="{% url 'main:eligibility_document' document.id %}">{{ document.original_name }}</a>
+                <span class="ml-auto text-base-500 whitespace-nowrap">{{ document.created_at|date:"d.m.Y H:i" }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
 
     <!-- Davomat kartalari: mijoz + guruh bo'yicha o'chmaydigan tarix -->
     <section class="flex flex-col gap-4" aria-labelledby="attendance-title">
@@ -164,7 +180,7 @@
                             <a href="{% url 'admin:main_transaction_change' tx.transaction_id %}" class="text-base-700 dark:text-base-300 hover:underline">{{ tx.transaction.group|default:"—" }}</a>
                         </td>
                         <td class="py-3 px-6">{{ tx.transaction.operator.full_name|default:"—" }}</td>
-                        <td class="py-3 px-6 text-right font-medium text-font-important-light dark:text-font-important-dark">{{ tx.share_amount|floatformat:0 }}</td>
+                        <td class="py-3 px-6 text-right font-medium text-font-important-light dark:text-font-important-dark">{{ tx.share_amount|money }}</td>
                         <td class="py-3 px-6">{{ tx.transaction.get_payment_type_display }}</td>
                         <td class="py-3 px-6">
                             {% if tx.transaction.is_refunded %}
@@ -175,7 +191,7 @@
                             <span class="bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300 font-medium px-2 py-0.5 rounded-default text-xs">{% trans "Kutilmoqda" %}</span>
                             {% endif %}
                         </td>
-                        <td class="py-3 px-6 text-right {% if tx.debt > 0 %}text-font-important-light dark:text-font-important-dark font-medium{% else %}text-base-500{% endif %}">{{ tx.debt|floatformat:0 }}</td>
+                        <td class="py-3 px-6 text-right {% if tx.debt > 0 %}text-font-important-light dark:text-font-important-dark font-medium{% else %}text-base-500{% endif %}">{{ tx.debt|money }}</td>
                         <td class="py-3 px-6 text-right text-base-500">{{ tx.transaction.date|date:"d.m.Y" }}</td>
                     </tr>
                     {% empty %}

@@ -1,5 +1,5 @@
 {% extends 'unfold/layouts/base.html' %}
-{% load i18n tz %}
+{% load money i18n tz %}
 
 {% block breadcrumbs %}{% endblock %}
 
@@ -107,11 +107,11 @@
 
             <div class="px-4 sm:px-6 py-4 border-b sm:border-r border-base-200 dark:border-base-800">
                 <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Asosiy summa" %}</dt>
-                <dd class="font-semibold tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ initial_amount|floatformat:0 }} UZS</dd>
+                <dd class="font-semibold tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ initial_amount|money }} UZS</dd>
             </div>
             <div class="px-4 sm:px-6 py-4 border-b lg:border-r border-base-200 dark:border-base-800">
                 <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Hozirgi summa" %}</dt>
-                <dd class="font-semibold tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ transaction.amount|floatformat:0 }} UZS</dd>
+                <dd class="font-semibold tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ transaction.amount|money }} UZS</dd>
             </div>
             <div class="px-4 sm:px-6 py-4 border-b sm:border-r border-base-200 dark:border-base-800">
                 <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "To'lov turi" %}</dt>
@@ -119,7 +119,7 @@
             </div>
             <div class="px-4 sm:px-6 py-4 border-b border-base-200 dark:border-base-800">
                 <dt class="text-xs uppercase tracking-wider text-base-500 mb-1">{% trans "Chegirma" %}</dt>
-                <dd class="font-semibold tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ discount_total|floatformat:0 }} UZS</dd>
+                <dd class="font-semibold tabular-nums text-font-important-light dark:text-font-important-dark mb-0">{{ discount_total|money }} UZS</dd>
             </div>
 
             <div class="px-4 sm:px-6 py-4 sm:border-r border-b sm:border-b-0 border-base-200 dark:border-base-800">

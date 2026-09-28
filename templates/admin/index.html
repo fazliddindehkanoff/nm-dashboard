@@ -1,5 +1,5 @@
 {% extends 'unfold/layouts/base.html' %}
-{% load i18n unfold %}
+{% load money i18n unfold %}
 
 {% block breadcrumbs %}{% endblock %}
 
@@ -107,32 +107,6 @@
         </div>
         {% endif %}
 
-        {% if perms.main.view_telegramcampaign %}
-        <section class="bg-primary-950 border border-primary-900 overflow-hidden p-6 relative rounded-default text-white">
-            <div class="absolute border-[18px] border-primary-400/10 h-40 -right-16 -top-16 rounded-full w-40"></div>
-            <div class="flex flex-col gap-5 relative">
-                <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                        <p class="font-semibold text-primary-300 text-xs tracking-[0.18em] uppercase">Telegram aloqa markazi</p>
-                        <h2 class="font-semibold mt-1 text-xl">Reklama va xabarlar statistikasi</h2>
-                    </div>
-                    <a href="/admin/main/telegramcampaign/" class="border border-primary-700 flex font-medium gap-2 items-center justify-center px-4 py-2 rounded-default text-sm hover:border-primary-400">
-                        Barcha kampaniyalar
-                        <span class="material-symbols-outlined text-base" aria-hidden="true">arrow_forward</span>
-                    </a>
-                </div>
-                <div class="gap-3 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
-                    <div><small class="text-primary-200">Obunachilar</small><strong class="block mt-1 text-2xl">{{ telegram_stats.subscribers }}</strong></div>
-                    <div><small class="text-primary-200">Tayyor profil</small><strong class="block mt-1 text-2xl">{{ telegram_stats.ready }}</strong></div>
-                    <div><small class="text-primary-200">Kampaniyalar</small><strong class="block mt-1 text-2xl">{{ telegram_stats.campaigns }}</strong></div>
-                    <div><small class="text-primary-200">Yuborildi</small><strong class="block mt-1 text-2xl text-primary-300">{{ telegram_stats.sent }}</strong></div>
-                    <div><small class="text-primary-200">Navbatda</small><strong class="block mt-1 text-2xl">{{ telegram_stats.queued }}</strong></div>
-                    <div><small class="text-primary-200">Xato</small><strong class="block mt-1 text-2xl text-red-300">{{ telegram_stats.failed }}</strong></div>
-                    <div><small class="text-primary-200">Bloklangan</small><strong class="block mt-1 text-2xl text-amber-300">{{ telegram_stats.blocked }}</strong></div>
-                </div>
-            </div>
-        </section>
-        {% endif %}
 
         <!-- ===== KPI Cards ===== -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -144,7 +118,7 @@
                 <div>
                     <p class="leading-relaxed mb-0 text-sm">Jami Tushum</p>
                     <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-0.5">
-                        {{ total_income|floatformat:0|default:"0" }} <span class="text-sm font-normal text-base-500">UZS</span>
+                        {{ total_income|money }} <span class="text-sm font-normal text-base-500">UZS</span>
                     </div>
                 </div>
             </div>
@@ -157,7 +131,7 @@
                 <div>
                     <p class="leading-relaxed mb-0 text-sm">Qarzdorlik</p>
                     <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-0.5">
-                        {{ total_debt|floatformat:0|default:"0" }} <span class="text-sm font-normal text-base-500">UZS</span>
+                        {{ total_debt|money }} <span class="text-sm font-normal text-base-500">UZS</span>
                     </div>
                 </div>
             </div>
@@ -304,7 +278,7 @@
                                 <td class="py-3 px-6 text-base-500">{{ row.rank }}</td>
                                 <td class="py-3 px-6 text-font-important-light dark:text-font-important-dark">{{ row.name }}</td>
                                 <td class="py-3 px-6 text-right">{{ row.sales_count }} ta</td>
-                                <td class="py-3 px-6 text-right font-semibold text-font-important-light dark:text-font-important-dark">{{ row.total|floatformat:0 }}</td>
+                                <td class="py-3 px-6 text-right font-semibold text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ row.total|money }}</td>
                             </tr>
                             {% empty %}
                             <tr><td colspan="4" class="text-sm text-base-500 text-center py-6">Ma'lumot topilmadi</td></tr>
@@ -318,7 +292,7 @@
                             {% for row in website_rows %}
                             <div class="flex items-center gap-3 text-sm">
                                 <span class="text-font-important-light dark:text-font-important-dark">{{ row.name }}</span>
-                                <span class="ml-auto text-base-500">{{ row.cnt }} ta · {{ row.total|floatformat:0 }} UZS</span>
+                                <span class="ml-auto text-base-500">{{ row.cnt }} ta · {{ row.total|money }} UZS</span>
                             </div>
                             {% endfor %}
                         </div>
@@ -339,10 +313,11 @@
                         <div class="flex flex-col gap-2 relative w-full">
                             <div class="flex flex-row relative z-20 items-center gap-2">
                                 <h3 class="text-font-important-light dark:text-font-important-dark text-sm">
-                                    {% for c in t.clients.all %}{{ c.full_name }}{% if not forloop.last %}, {% endif %}{% endfor %} <span class="text-xs text-base-500 ml-1">({{ t.group }})</span>
+                                    <a href="{% url 'admin:main_transaction_change' t.pk %}" class="hover:underline">{% for c in t.clients.all %}{{ c.full_name }}{% if not forloop.last %}, {% endif %}{% empty %}To'lov #{{ t.pk }}{% endfor %}</a>
+                                    {% if t.group %}<span class="block text-xs text-base-500 mt-0.5">{{ t.group.course.name }} · {{ t.group.start_date|date:"d.m.Y" }}</span>{% endif %}
                                 </h3>
-                                <strong class="bg-base-100 font-medium text-font-important-light ml-auto px-1.5 py-1 rounded-default text-xs dark:text-font-important-dark dark:bg-base-800">
-                                    {{ t.amount|floatformat:0 }} UZS
+                                <strong class="bg-base-100 font-medium text-font-important-light ml-auto px-1.5 py-1 rounded-default text-xs dark:text-font-important-dark dark:bg-base-800 whitespace-nowrap">
+                                    {{ t.amount|money }} UZS
                                 </strong>
                             </div>
                             <div class="flex flex-row relative z-20 items-center justify-between text-xs text-base-500">
@@ -354,9 +329,9 @@
                                         {% else %}Doplata{% endif %}
                                     </span>
                                     {% if t.is_confirmed %}
-                                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300">Tasdiqlangan</span>
+                                    <span class="inline-flex items-center rounded-full px-2 py-0.5 font-medium" style="font-size: 11px; background: #dcfce7; color: #166534;">Tasdiqlangan</span>
                                     {% else %}
-                                    <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium bg-base-100 text-base-700 dark:bg-base-800 dark:text-base-300">Kutilmoqda</span>
+                                    <span class="inline-flex items-center rounded-full px-2 py-0.5 font-medium" style="font-size: 11px; background: #fef3c7; color: #92400e;">Kutilmoqda</span>
                                     {% endif %}
                                 </div>
                             </div>
@@ -369,6 +344,33 @@
                 </div>
             </div>
         </div>
+
+        {% if perms.main.view_telegramcampaign %}
+        <section class="bg-primary-950 border border-primary-900 overflow-hidden p-6 relative rounded-default text-white">
+            <div class="absolute border-[18px] border-primary-400/10 h-40 -right-16 -top-16 rounded-full w-40"></div>
+            <div class="flex flex-col gap-5 relative">
+                <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                        <p class="font-semibold text-primary-300 text-xs tracking-[0.18em] uppercase">Telegram aloqa markazi</p>
+                        <h2 class="font-semibold mt-1 text-xl">Reklama va xabarlar statistikasi</h2>
+                    </div>
+                    <a href="/admin/main/telegramcampaign/" class="border border-primary-700 flex font-medium gap-2 items-center justify-center px-4 py-2 rounded-default text-sm hover:border-primary-400">
+                        Barcha kampaniyalar
+                        <span class="material-symbols-outlined text-base" aria-hidden="true">arrow_forward</span>
+                    </a>
+                </div>
+                <div class="gap-3 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
+                    <div><small class="text-primary-200">Obunachilar</small><strong class="block mt-1 text-2xl">{{ telegram_stats.subscribers }}</strong></div>
+                    <div><small class="text-primary-200">Tayyor profil</small><strong class="block mt-1 text-2xl">{{ telegram_stats.ready }}</strong></div>
+                    <div><small class="text-primary-200">Kampaniyalar</small><strong class="block mt-1 text-2xl">{{ telegram_stats.campaigns }}</strong></div>
+                    <div><small class="text-primary-200">Yuborildi</small><strong class="block mt-1 text-2xl text-primary-300">{{ telegram_stats.sent }}</strong></div>
+                    <div><small class="text-primary-200">Navbatda</small><strong class="block mt-1 text-2xl">{{ telegram_stats.queued }}</strong></div>
+                    <div><small class="text-primary-200">Xato</small><strong class="block mt-1 text-2xl text-red-300">{{ telegram_stats.failed }}</strong></div>
+                    <div><small class="text-primary-200">Bloklangan</small><strong class="block mt-1 text-2xl text-amber-300">{{ telegram_stats.blocked }}</strong></div>
+                </div>
+            </div>
+        </section>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

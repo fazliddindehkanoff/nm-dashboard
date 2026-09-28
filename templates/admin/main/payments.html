@@ -1,14 +1,157 @@
 {% extends 'unfold/layouts/base.html' %}
 {% load money %}
+
+{% block breadcrumbs %}{% endblock %}
+
 {% block content %}
-<div class="p-6"><div class="flex justify-between items-center mb-6"><h1 class="text-2xl font-semibold">To‘lovlar</h1>{% if can_add %}<a class="bg-primary-600 text-white rounded px-4 py-2" href="{% url 'admin:main_transaction_add' %}">To‘lov qo‘shish</a>{% endif %}</div>
-<form method="get" class="flex flex-wrap gap-3 mb-6">
-<input class="border rounded p-2" aria-label="Qidirish" name="q" placeholder="Mijoz yoki kurs" value="{{ request.GET.q }}">
-<select class="border rounded p-2" aria-label="To‘lov usuli" name="method"><option value="">Barcha usullar</option>{% for value,label in methods %}<option value="{{ value }}" {% if selected_method == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
-<select class="border rounded p-2" aria-label="To‘lov holati" name="status"><option value="">Barcha holatlar</option>{% for value,label in statuses %}<option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
-<label>Dan <input class="border rounded p-2" type="date" name="from" value="{{ request.GET.from }}"></label><label>Gacha <input class="border rounded p-2" type="date" name="to" value="{{ request.GET.to }}"></label><button class="bg-primary-600 text-white rounded px-4 py-2">Filtrlash</button></form>
-<p class="mb-4">Tasdiqlangan to‘lovlar: <strong>{{ total|money }} so‘m</strong> · {{ page.paginator.count }} ta yozuv</p>
-<div class="overflow-x-auto"><table class="w-full"><thead><tr><th class="p-3 text-left">Sana</th><th class="p-3 text-left">Mijoz / kurs</th><th class="p-3 text-left">Summa</th><th class="p-3 text-left">Usul</th><th class="p-3 text-left">Holat</th><th class="p-3 text-left">Manba</th></tr></thead><tbody>
-{% for row in page %}<tr class="border-t"><td class="p-3">{{ row.date|date:'d.m.Y' }}</td><td class="p-3">{% if row.link %}<a class="text-primary-600 underline" href="{{ row.link }}">{{ row.name|default:'—' }}</a>{% else %}{{ row.name|default:'—' }}{% endif %}<div class="text-sm">{{ row.course }}</div></td><td class="p-3">{{ row.amount|money }} so‘m</td><td class="p-3">{{ row.method }}</td><td class="p-3">{{ row.status_label }}</td><td class="p-3">{{ row.source }} · {{ row.reference }}</td></tr>{% empty %}<tr><td colspan="6" class="p-6">To‘lovlar topilmadi.</td></tr>{% endfor %}
-</tbody></table></div><div class="flex gap-4 mt-6">{% if page.has_previous %}<a href="?{{ query }}&page={{ page.previous_page_number }}">← Oldingi</a>{% endif %}<span>{{ page.number }} / {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?{{ query }}&page={{ page.next_page_number }}">Keyingi →</a>{% endif %}</div></div>
+<style>
+    .pay-status { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .pay-status--success { background: #dcfce7; color: #166534; }
+    .pay-status--pending { background: #fef3c7; color: #92400e; }
+    .pay-status--failed { background: #fee2e2; color: #991b1b; }
+    .pay-status--refunded { background: #e5e7eb; color: #374151; }
+    .pay-source { display: inline-block; border-radius: 6px; padding: 1px 7px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .pay-source--web { background: #e0f7f9; color: #0b6f7c; }
+    .pay-source--crm { background: #eef2ff; color: #3730a3; }
+    .pay-source--sub { background: #f3e8ff; color: #6b21a8; }
+    .pay-tab { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 500; white-space: nowrap; }
+    .pay-tab__count { border-radius: 999px; padding: 0 7px; font-size: 11px; background: rgba(100, 116, 139, .18); }
+    .pay-field { height: 38px; border-radius: 8px; padding: 0 10px; font-size: 14px; }
+    .pay-icon { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 999px; flex-shrink: 0; }
+    .dark .pay-status--refunded { background: #374151; color: #e5e7eb; }
+</style>
+
+<div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-6">
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div class="flex flex-col gap-1">
+            <h1 class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark">To‘lovlar</h1>
+            <p class="text-sm text-base-500 mb-0">CRM to‘lovlari, qo‘shimcha to‘lovlar va web app (Rahmat) to‘lovlari bitta ro‘yxatda.</p>
+        </div>
+        {% if can_add %}
+        <a href="{% url 'admin:main_transaction_add' %}" class="flex items-center gap-2 bg-primary-600 text-white font-medium px-4 py-2 rounded-default text-sm hover:bg-primary-700 transition-colors">
+            <span class="material-symbols-outlined" style="font-size: 18px;" aria-hidden="true">add_card</span>
+            To‘lov qo‘shish
+        </a>
+        {% endif %}
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <a href="?{{ tab_query }}{% if tab_query %}&amp;{% endif %}status=success" class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800 hover:border-base-400 transition-colors">
+            <span class="pay-icon" style="background: #dcfce7; color: #166534;"><span class="material-symbols-outlined" aria-hidden="true">task_alt</span></span>
+            <div class="min-w-0">
+                <p class="text-sm text-base-500 mb-0">Tasdiqlangan</p>
+                <div class="font-semibold text-xl text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ summary.success.amount|money }} <span class="text-xs font-normal text-base-500">UZS</span></div>
+                <p class="text-xs text-base-500 mb-0">{{ summary.success.count }} ta to‘lov</p>
+            </div>
+        </a>
+        <a href="?{{ tab_query }}{% if tab_query %}&amp;{% endif %}status=pending" class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800 hover:border-base-400 transition-colors">
+            <span class="pay-icon" style="background: #fef3c7; color: #92400e;"><span class="material-symbols-outlined" aria-hidden="true">pending_actions</span></span>
+            <div class="min-w-0">
+                <p class="text-sm text-base-500 mb-0">Tasdiq kutilmoqda</p>
+                <div class="font-semibold text-xl text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ summary.pending.count }} <span class="text-xs font-normal text-base-500">ta</span></div>
+                <p class="text-xs text-base-500 mb-0">{{ summary.pending.amount|money }} UZS</p>
+            </div>
+        </a>
+        <div class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800">
+            <span class="pay-icon" style="background: #e0f7f9; color: #0b6f7c;"><span class="material-symbols-outlined" aria-hidden="true">smartphone</span></span>
+            <div class="min-w-0">
+                <p class="text-sm text-base-500 mb-0">Web app (Rahmat)</p>
+                <div class="font-semibold text-xl text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ web_app_total|money }} <span class="text-xs font-normal text-base-500">UZS</span></div>
+                <p class="text-xs text-base-500 mb-0">tasdiqlangan onlayn to‘lovlar</p>
+            </div>
+        </div>
+        <a href="?{{ tab_query }}{% if tab_query %}&amp;{% endif %}status=refunded" class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800 hover:border-base-400 transition-colors">
+            <span class="pay-icon bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300"><span class="material-symbols-outlined" aria-hidden="true">assignment_return</span></span>
+            <div class="min-w-0">
+                <p class="text-sm text-base-500 mb-0">Qaytarilgan</p>
+                <div class="font-semibold text-xl text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ summary.refunded.count }} <span class="text-xs font-normal text-base-500">ta</span></div>
+                <p class="text-xs text-base-500 mb-0">{{ summary.refunded.amount|money }} UZS</p>
+            </div>
+        </a>
+    </div>
+
+    <div class="bg-white rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800">
+        <nav class="flex flex-wrap items-center gap-2 px-5 py-4 border-b border-base-200 dark:border-base-800" aria-label="Holat bo‘yicha">
+            {% for tab in tabs %}
+            <a href="?{{ tab_query }}{% if tab.value %}{% if tab_query %}&amp;{% endif %}status={{ tab.value }}{% endif %}"
+               class="pay-tab {% if selected_status == tab.value %}bg-base-900 text-white dark:bg-base-100 dark:text-base-900{% else %}bg-base-100 text-base-700 hover:bg-base-200 dark:bg-base-800 dark:text-base-300{% endif %}"
+               {% if selected_status == tab.value %}aria-current="page"{% endif %}>
+                {{ tab.label }} <span class="pay-tab__count">{{ tab.count }}</span>
+            </a>
+            {% endfor %}
+        </nav>
+
+        <form method="get" class="flex flex-wrap items-end gap-3 px-5 py-4 border-b border-base-200 dark:border-base-800">
+            {% if selected_status %}<input type="hidden" name="status" value="{{ selected_status }}">{% endif %}
+            <label class="flex flex-col gap-1 text-xs text-base-500 grow" style="min-width: 220px;">Qidirish
+                <input class="pay-field border border-base-200 bg-white dark:bg-base-900 dark:border-base-700 text-font-important-light dark:text-font-important-dark" name="q" placeholder="Mijoz, kurs yoki raqam" value="{{ request.GET.q }}">
+            </label>
+            <label class="flex flex-col gap-1 text-xs text-base-500">To‘lov usuli
+                <select class="pay-field border border-base-200 bg-white dark:bg-base-900 dark:border-base-700 text-font-important-light dark:text-font-important-dark" name="method">
+                    <option value="">Barcha usullar</option>
+                    {% for value, label in methods %}<option value="{{ value }}" {% if selected_method == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+            </label>
+            <label class="flex flex-col gap-1 text-xs text-base-500">Sanadan
+                <input class="pay-field border border-base-200 bg-white dark:bg-base-900 dark:border-base-700 text-font-important-light dark:text-font-important-dark" type="date" name="from" value="{{ request.GET.from }}">
+            </label>
+            <label class="flex flex-col gap-1 text-xs text-base-500">Sanagacha
+                <input class="pay-field border border-base-200 bg-white dark:bg-base-900 dark:border-base-700 text-font-important-light dark:text-font-important-dark" type="date" name="to" value="{{ request.GET.to }}">
+            </label>
+            <button class="pay-field bg-base-900 text-white dark:bg-base-100 dark:text-base-900 font-medium px-4">Filtrlash</button>
+            {% if has_filters %}<a href="?{% if selected_status %}status={{ selected_status }}{% endif %}" class="text-sm text-primary-600 dark:text-primary-400 hover:underline" style="line-height: 38px;">Tozalash</a>{% endif %}
+        </form>
+
+        <div class="flex items-center justify-between gap-3 px-5 py-3 text-sm text-base-500">
+            <span>{{ page.paginator.count }} ta yozuv</span>
+            <span>Tasdiqlangan jami: <strong class="text-font-important-light dark:text-font-important-dark">{{ total|money }} UZS</strong></span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-y border-base-200 dark:border-base-800 text-left text-xs uppercase text-base-500">
+                        <th class="py-3 px-5 font-medium">Sana</th>
+                        <th class="py-3 px-5 font-medium">Mijoz va kurs</th>
+                        <th class="py-3 px-5 font-medium text-right">Summa (UZS)</th>
+                        <th class="py-3 px-5 font-medium">Usul</th>
+                        <th class="py-3 px-5 font-medium">Holat</th>
+                        <th class="py-3 px-5 font-medium">Manba</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in page %}
+                    <tr class="border-b border-base-200 dark:border-base-800 last:border-0 hover:bg-base-50 dark:hover:bg-base-800">
+                        <td class="py-3 px-5 text-base-500 whitespace-nowrap">{{ row.date|date:'d.m.Y' }}</td>
+                        <td class="py-3 px-5">
+                            {% if row.link %}<a class="font-medium text-font-important-light dark:text-font-important-dark hover:underline" href="{{ row.link }}">{{ row.name|default:'—' }}</a>{% else %}<span class="font-medium text-font-important-light dark:text-font-important-dark">{{ row.name|default:'—' }}</span>{% endif %}
+                            <div class="text-xs text-base-500 mt-0.5">{{ row.course }}</div>
+                        </td>
+                        <td class="py-3 px-5 text-right font-semibold text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ row.amount|money }}</td>
+                        <td class="py-3 px-5 whitespace-nowrap">{{ row.method }}</td>
+                        <td class="py-3 px-5"><span class="pay-status pay-status--{{ row.status }}">{{ row.status_label }}</span></td>
+                        <td class="py-3 px-5 whitespace-nowrap">
+                            <span class="pay-source {% if row.source == 'Web App' %}pay-source--web{% elif row.source == 'CRM' %}pay-source--crm{% else %}pay-source--sub{% endif %}">{{ row.source }}</span>
+                            <span class="text-xs text-base-500 ml-1">{{ row.reference }}</span>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6" class="py-12 px-5 text-center text-base-500">
+                        <span class="material-symbols-outlined text-base-400" style="font-size: 32px;" aria-hidden="true">search_off</span>
+                        <p class="mt-2 mb-0">To‘lovlar topilmadi. Filtrlarni o‘zgartirib ko‘ring.</p>
+                    </td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if page.paginator.num_pages > 1 %}
+        <div class="flex items-center justify-between gap-3 px-5 py-4 border-t border-base-200 dark:border-base-800 text-sm">
+            {% if page.has_previous %}<a class="border border-base-200 dark:border-base-700 rounded-default px-3 py-1.5 hover:bg-base-100 dark:hover:bg-base-800" href="?{{ query }}&amp;page={{ page.previous_page_number }}">← Oldingi</a>{% else %}<span></span>{% endif %}
+            <span class="text-base-500">{{ page.number }} / {{ page.paginator.num_pages }} sahifa</span>
+            {% if page.has_next %}<a class="border border-base-200 dark:border-base-700 rounded-default px-3 py-1.5 hover:bg-base-100 dark:hover:bg-base-800" href="?{{ query }}&amp;page={{ page.next_page_number }}">Keyingi →</a>{% else %}<span></span>{% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
 {% endblock %}

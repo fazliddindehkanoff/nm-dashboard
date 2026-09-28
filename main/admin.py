@@ -52,10 +52,21 @@ from .services.telegram import send_payment_qr, TelegramNotConfigured
 from .services.telegram_campaigns import queue_campaign
 from .services.legal import contract_version, TERMS_VERSION
 from .services.mini_app import sync_group_payment
+from .templatetags.money import money
 
 
 def _is_plain_operator(request):
     return is_operator(request.user)
+
+
+def _money(value):
+    """Readable UZS amount for list columns, e.g. 1 200 000."""
+    return money(value)
+
+
+PAYMENT_STATE_COLORS = {
+    _("Tasdiqlangan"): "success", _("Kutilmoqda"): "warning", _("Qaytarilgan"): "danger",
+}
 
 
 def _with_attendance_payment_status(queryset):
@@ -108,8 +119,12 @@ def _get_or_create_client(request, client_name, client_phone):
 
 @admin.register(Course)
 class CourseAdmin(ModelAdmin):
-    list_display = ('name', 'price', 'number_of_days')
+    list_display = ('name', 'price_display', 'number_of_days')
     search_fields = ('name',)
+
+    @display(description=_("Narxi (so'm)"), ordering='price')
+    def price_display(self, obj):
+        return _money(obj.price)
 
 
 @admin.register(Teacher)
@@ -176,9 +191,9 @@ class GroupAdmin(ModelAdmin):
     form = GroupForm
     change_form_template = 'admin/main/group/change_form.html'
     list_display = (
-        'group_link', 'course', 'get_teachers', 'start_date', 'number_of_days',
-        'participants_count', 'active_badge',
+        'group_link', 'start_date', 'number_of_days', 'participants_count', 'active_badge',
     )
+    ordering = ('start_date', 'id')
     list_display_links = None
     search_fields = ('course__name', 'teachers__full_name')
     list_filter = (GroupStatusFilter, 'course', 'start_date')
@@ -291,13 +306,15 @@ class GroupAdmin(ModelAdmin):
         ]
         return custom + urls
 
-    @display(description=_("Guruh"))
+    @display(description=_("Guruh (kurs va o'qituvchi)"), ordering='course__name')
     def group_link(self, obj):
         url = reverse("admin:main_group_detail", args=[obj.pk])
         return format_html(
-            '<a href="{}" class="text-base-700 dark:text-base-300 font-medium hover:underline">{}</a>',
+            '<a href="{}" class="text-base-700 dark:text-base-300 font-medium hover:underline">{}</a>'
+            '<div class="text-xs text-base-500 mt-0.5">{}</div>',
             url,
-            str(obj),
+            obj.course.name,
+            self.get_teachers(obj) or _("O'qituvchi biriktirilmagan"),
         )
 
     def group_detail_view(self, request, object_id):
@@ -523,7 +540,7 @@ class GroupAdmin(ModelAdmin):
     def get_teachers(self, obj):
         return ", ".join([t.full_name for t in obj.teachers.all()])
 
-    @display(description=_("Holati"), label={_("Faol"): "default", _("Arxivlangan"): "default"})
+    @display(description=_("Holati"), label={_("Faol"): "success", _("Arxivlangan"): "default"})
     def active_badge(self, obj):
         return _("Faol") if obj.is_active else _("Arxivlangan")
 
@@ -537,7 +554,7 @@ class QuickAddClientForm(forms.Form):
 class ClientAdmin(ModelAdmin):
     list_display = (
         'client_link', 'phone_number', 'operator', 'joined_groups_count',
-        'loan_amount', 'amocrm_badge', 'synced_at',
+        'loan_amount', 'amocrm_badge',
     )
     list_display_links = None
     search_fields = ('full_name', 'phone_number', 'amocrm_id')
@@ -581,9 +598,9 @@ class ClientAdmin(ModelAdmin):
     def joined_groups_count(self, obj):
         return obj.joined_groups_count or 0
 
-    @display(description=_("Qarzi"))
+    @display(description=_("Qarzi (so'm)"), ordering='loan_amount')
     def loan_amount(self, obj):
-        return obj.loan_amount or 0
+        return _money(obj.loan_amount)
 
     # ---- Mijoz detail sahifasi (faqat o'qish uchun) ----
     def get_urls(self):
@@ -917,7 +934,11 @@ class OperatorAdmin(ModelAdmin):
 
 @admin.register(Expense)
 class ExpenseAdmin(ModelAdmin):
-    list_display = ('date', 'category_badge', 'amount', 'description', 'created_by')
+    list_display = ('date', 'category_badge', 'amount_display', 'description', 'created_by')
+
+    @display(description=_("Summa (so'm)"), ordering='amount')
+    def amount_display(self, obj):
+        return _money(obj.amount)
     list_filter = ('category', 'date', 'created_by')
     search_fields = ('description', 'created_by__username', 'created_by__operator__full_name')
     date_hierarchy = 'date'
@@ -1269,8 +1290,8 @@ class TransactionAdmin(ModelAdmin):
     form = TransactionForm
     inlines = (TransactionClientInline,)
     list_display = (
-        'transaction_link', 'operator', 'group', 'amount', 'payment_type',
-        'discount_total', 'source', 'confirmed_badge', 'refunded_badge', 'total_debt_display', 'date',
+        'transaction_link', 'group_short', 'amount_display', 'payment_type',
+        'payment_state_badge', 'total_debt_display', 'operator_display', 'date_display',
     )
     list_display_links = None
     list_filter = ('is_confirmed', 'is_refunded', 'payment_method', 'payment_type', 'source', 'operator', 'group')
@@ -1459,7 +1480,8 @@ class TransactionAdmin(ModelAdmin):
         qs = super().get_queryset(request)
         if _is_plain_operator(request):
             qs = qs.filter(operator=request.user.operator)
-        return qs.prefetch_related(
+        return qs.select_related('group__course', 'operator').prefetch_related(
+            'clients',
             'participants__client',
             'sub_transactions__clients',
             'sub_transactions__received_by',
@@ -1724,9 +1746,38 @@ class TransactionAdmin(ModelAdmin):
         names = [c.full_name for c in obj.clients.all()]
         return ", ".join(names) if names else "—"
 
-    @display(description=_("Qarzi"))
+    @display(description=_("Qarzi (so'm)"), ordering='total_debt')
     def total_debt_display(self, obj):
-        return obj.total_debt or 0
+        return _money(obj.total_debt)
+
+    @display(description=_("Summa (so'm)"), ordering='amount')
+    def amount_display(self, obj):
+        return _money(obj.amount)
+
+    @display(description=_("Guruh"), ordering='group__start_date')
+    def group_short(self, obj):
+        if not obj.group:
+            return "—"
+        return format_html(
+            '{}<div class="text-xs text-base-500 mt-0.5">{}</div>',
+            obj.group.course.name, obj.group.start_date.strftime('%d.%m.%Y'),
+        )
+
+    @display(description=_("Holati"), label=PAYMENT_STATE_COLORS)
+    def payment_state_badge(self, obj):
+        if obj.is_refunded:
+            return _("Qaytarilgan")
+        return _("Tasdiqlangan") if obj.is_confirmed else _("Kutilmoqda")
+
+    @display(description=_("Sana"), ordering='date')
+    def date_display(self, obj):
+        return obj.date.strftime('%d.%m.%Y') if obj.date else "—"
+
+    @display(description=_("Kim kiritdi"), ordering='operator__full_name')
+    def operator_display(self, obj):
+        if obj.mini_app_purchase_id:
+            return _("Web app")
+        return obj.operator.full_name if obj.operator else "—"
 
     @display(description=_("Chek"))
     def screenshot_preview(self, obj):
@@ -2042,9 +2093,13 @@ class SubTransactionAdmin(ModelAdmin):
     """Ichki to'lovlar navbati — admin har birini alohida tasdiqlaydi."""
 
     list_display = (
-        'transaction_link', 'clients_display', 'amount', 'payment_method_display',
+        'transaction_link', 'clients_display', 'amount_display', 'payment_method_display',
         'receipt_display', 'received_by_display', 'received_at', 'status_badge',
     )
+
+    @display(description=_("Summa (so'm)"), ordering='amount')
+    def amount_display(self, obj):
+        return _money(obj.amount)
     list_filter = ('status', 'payment_method', 'transaction__group', 'received_by')
     search_fields = ('clients__full_name', 'transaction__id')
     date_hierarchy = 'received_at'
@@ -2517,9 +2572,8 @@ class MiniAppPurchaseAdminForm(forms.ModelForm):
 class MiniAppPurchaseAdmin(ModelAdmin):
     form = MiniAppPurchaseAdminForm
     list_display = (
-        'telegram_user', 'course', 'group', 'purchase_type', 'participant_count',
-        'sale_amount_display', 'paid_amount', 'balance', 'contract_status', 'payment_status',
-        'group_payment_link', 'questionnaire_completed', 'created_at',
+        'buyer_display', 'course_group_display', 'participants_short',
+        'sale_amount_display', 'paid_display', 'balance', 'payment_status_badge', 'created_short',
     )
     list_filter = (
         'payment_status', 'purchase_type', 'questionnaire_completed', 'course',
@@ -2537,7 +2591,7 @@ class MiniAppPurchaseAdmin(ModelAdmin):
     def get_queryset(self, request):
         queryset = super().get_queryset(request).select_related(
             'telegram_user', 'course', 'group__course', 'group_payment',
-        ).prefetch_related('group__teachers')
+        )
         return queryset.filter(referrer=request.user.operator) if _is_plain_operator(request) else queryset
 
     def get_readonly_fields(self, request, obj=None):
@@ -2570,13 +2624,48 @@ class MiniAppPurchaseAdmin(ModelAdmin):
             reverse('admin:main_transaction_change', args=[payment.pk]), payment.pk,
         )
 
-    @display(description=_("Qolgan qarz"))
-    def balance(self, obj):
-        return obj.remaining_amount
+    @display(description=_("Kishi"), ordering='participant_count')
+    def participants_short(self, obj):
+        return obj.participant_count
 
-    @display(description=_("Sotuv summasi (chegirmalardan keyin)"))
+    @display(description=_("Sana"), ordering='created_at')
+    def created_short(self, obj):
+        return timezone.localtime(obj.created_at).strftime('%d.%m.%Y')
+
+    @display(description=_("Qarz (so'm)"))
+    def balance(self, obj):
+        return _money(obj.remaining_amount)
+
+    @display(description=_("Sotuv (so'm)"))
     def sale_amount_display(self, obj):
-        return obj.sale_amount
+        return _money(obj.sale_amount)
+
+    @display(description=_("To'langan (so'm)"), ordering='paid_amount')
+    def paid_display(self, obj):
+        return _money(obj.paid_amount)
+
+    @display(description=_("Xaridor"), ordering='telegram_user__full_name')
+    def buyer_display(self, obj):
+        return format_html(
+            '{}<div class="text-xs text-base-500 mt-0.5">{}</div>',
+            obj.telegram_user.full_name or obj.telegram_user.username or '—', obj.telegram_user.phone_number or '',
+        )
+
+    @display(description=_("Kurs va guruh"), ordering='course__name')
+    def course_group_display(self, obj):
+        group = obj.group.start_date.strftime('%d.%m.%Y') if obj.group else _("Guruh biriktirilmagan")
+        return format_html('{}<div class="text-xs text-base-500 mt-0.5">{}</div>', obj.course.name, group)
+
+    @display(
+        description=_("To'lov holati"), ordering='payment_status',
+        label={
+            _("To'langan"): "success", _("Bron qilingan — qisman to'langan"): "info",
+            _("To'lov kutilmoqda"): "warning", _("To'lov amalga oshmadi"): "danger",
+            _("To'lov qaytarilgan"): "danger", _("Savatga qaytarilgan"): "default",
+        },
+    )
+    def payment_status_badge(self, obj):
+        return obj.get_payment_status_display()
 
     @display(description=_("Shartnoma"), boolean=True)
     def contract_status(self, obj):

@@ -39,7 +39,8 @@ def build_statistics(transactions):
     for i, row in enumerate(operators_rating, start=1):
         row['rank'] = i
         row['total'] = float(row['total'] or 0)
-        row['name'] = row['operator__full_name'] or "—"
+        # Web app payments have no operator; label them instead of a dash.
+        row['name'] = row['operator__full_name'] or "Web app / operatorsiz"
 
     # 2) Kurslar/guruhlar kesimidagi to'lovlar (pie chart)
     course_rows = list(
@@ -203,7 +204,7 @@ def dashboard_callback(request, context):
         "total_debt": TransactionClient.objects.filter(transaction__in=confirmed_transactions).aggregate(
             total=Sum('debt')
         )['total'] or 0,
-        "recent_transactions": all_transactions.prefetch_related('clients').select_related('group').order_by('-date', '-id')[:6],
+        "recent_transactions": all_transactions.prefetch_related('clients').select_related('group__course').order_by('-date', '-id')[:6],
         "operators": (
             Operator.objects.filter(role=RoleConfiguration.ROLE_OPERATOR)
             if not is_plain_op else Operator.objects.filter(id=request.user.operator.id)

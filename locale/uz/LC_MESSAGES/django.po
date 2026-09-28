@@ -1,0 +1,562 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: uz\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#, python-brace-format
+msgid "Added {name} “{object}”."
+msgstr "{name} “{object}” qo‘shildi."
+
+msgid "Added."
+msgstr "Qo‘shildi."
+
+#, python-brace-format
+msgid "Changed {fields} for {name} “{object}”."
+msgstr "{name} “{object}”: {fields} o‘zgartirildi."
+
+#, python-brace-format
+msgid "Changed {fields}."
+msgstr "{fields} o‘zgartirildi."
+
+#, python-brace-format
+msgid "Deleted {name} “{object}”."
+msgstr "{name} “{object}” o‘chirildi."
+
+msgid "No fields changed."
+msgstr "Hech narsa o‘zgarmadi."
+
+msgid "Hold down “Control”, or “Command” on a Mac, to select more than one."
+msgstr "Bir nechtasini tanlash uchun “Control” (Mac’da “Command”) tugmasini bosib turing."
+
+#, python-brace-format
+msgid "The {name} “{obj}” was added successfully."
+msgstr "{name} “{obj}” muvaffaqiyatli qo‘shildi."
+
+msgid "You may edit it again below."
+msgstr "Quyida uni qayta tahrirlashingiz mumkin."
+
+#, python-brace-format
+msgid "The {name} “{obj}” was added successfully. You may add another {name} below."
+msgstr "{name} “{obj}” muvaffaqiyatli qo‘shildi. Quyida yana qo‘shishingiz mumkin."
+
+#, python-brace-format
+msgid "The {name} “{obj}” was changed successfully. You may edit it again below."
+msgstr "{name} “{obj}” muvaffaqiyatli saqlandi. Quyida uni qayta tahrirlashingiz mumkin."
+
+#, python-brace-format
+msgid "The {name} “{obj}” was added successfully. You may edit it again below."
+msgstr "{name} “{obj}” muvaffaqiyatli qo‘shildi. Quyida uni qayta tahrirlashingiz mumkin."
+
+#, python-brace-format
+msgid "The {name} “{obj}” was changed successfully. You may add another {name} below."
+msgstr "{name} “{obj}” muvaffaqiyatli saqlandi. Quyida yana qo‘shishingiz mumkin."
+
+#, python-brace-format
+msgid "The {name} “{obj}” was changed successfully."
+msgstr "{name} “{obj}” muvaffaqiyatli saqlandi."
+
+#, python-brace-format
+msgid "The {name} “{obj}” was deleted successfully."
+msgstr "{name} “{obj}” o‘chirildi."
+
+msgid "Items must be selected in order to perform actions on them. No items have been changed."
+msgstr "Amalni bajarish uchun kamida bitta qatorni tanlang. Hech narsa o‘zgarmadi."
+
+msgid "No action selected."
+msgstr "Amal tanlanmadi."
+
+#, python-format
+msgid "%(name)s with ID “%(key)s” doesn’t exist. Perhaps it was deleted?"
+msgstr "ID “%(key)s” bo‘lgan %(name)s topilmadi. Balki o‘chirilgandir?"
+
+msgid "%(total_count)s selected"
+msgid_plural "All %(total_count)s selected"
+msgstr[0] "%(total_count)s ta tanlandi"
+
+#, python-format
+msgid "0 of %(cnt)s selected"
+msgstr "%(cnt)s tadan 0 tasi tanlandi"
+
+#, python-format
+msgid "Change history: %s"
+msgstr "O‘zgarishlar tarixi: %s"
+
+#, python-format
+msgid "%(class_name)s %(instance)s"
+msgstr "%(class_name)s %(instance)s"
+
+msgid "Django site admin"
+msgstr "Norbekov Markazi"
+
+msgid "Django administration"
+msgstr "Norbekov Markazi"
+
+msgid "Site administration"
+msgstr "Bosh sahifa"
+
+msgid "Log in"
+msgstr "Kirish"
+
+#, python-format
+msgid "%(app)s administration"
+msgstr "%(app)s"
+
+msgid "Page not found"
+msgstr "Sahifa topilmadi"
+
+msgid "We’re sorry, but the requested page could not be found."
+msgstr "Kechirasiz, so‘ralgan sahifa topilmadi."
+
+msgid "Home"
+msgstr "Bosh sahifa"
+
+msgid "Go"
+msgstr "Bajarish"
+
+msgid "Click here to select the objects across all pages"
+msgstr "Barcha sahifalardagi qatorlarni tanlash"
+
+#, python-format
+msgid "Select all %(total_count)s %(module_name)s"
+msgstr "Hammasini tanlash: %(total_count)s ta %(module_name)s"
+
+msgid "Clear selection"
+msgstr "Tanlovni bekor qilish"
+
+#, python-format
+msgid "Models in the %(name)s application"
+msgstr "%(name)s bo‘limlari"
+
+msgid "You don’t have permission to view or edit anything."
+msgstr "Sizda hech narsani ko‘rish yoki tahrirlash huquqi yo‘q."
+
+msgid "Please correct the error below."
+msgstr "Quyidagi xatoni tuzating."
+
+msgid "Please correct the errors below."
+msgstr "Quyidagi xatolarni tuzating."
+
+msgid "History"
+msgstr "Tarix"
+
+msgid "Clear all filters"
+msgstr "Barcha filtrlarni tozalash"
+
+#, python-format
+msgid "Sorting priority: %(priority_number)s"
+msgstr "Saralash tartibi: %(priority_number)s"
+
+msgid "Toggle sorting"
+msgstr "Saralashni o‘zgartirish"
+
+msgid "Objects"
+msgstr "Obyektlar"
+
+msgid "Yes, I’m sure"
+msgstr "Ha, ishonchim komil"
+
+msgid "No, take me back"
+msgstr "Yo‘q, ortga qaytish"
+
+msgid "Delete multiple objects"
+msgstr "Bir nechta qatorni o‘chirish"
+
+msgid "None available"
+msgstr "Mavjud emas"
+
+msgid "Unknown content"
+msgstr "Noma’lum kontent"
+
+msgid "Forgotten your password or username?"
+msgstr "Parol yoki loginni unutdingizmi?"
+
+msgid "Start typing to filter…"
+msgstr "Qidirish uchun yozing…"
+
+msgid "Filter navigation items"
+msgstr "Menyudan qidirish"
+
+msgid "Date/time"
+msgstr "Sana va vaqt"
+
+msgid "User"
+msgstr "Foydalanuvchi"
+
+msgid "Action"
+msgstr "Amal"
+
+msgid "This object doesn’t have a change history. It probably wasn’t added via this admin site."
+msgstr "Bu yozuvning o‘zgarishlar tarixi yo‘q."
+
+msgid "Show all"
+msgstr "Hammasini ko‘rsatish"
+
+msgid "%(counter)s result"
+msgid_plural "%(counter)s results"
+msgstr[0] "%(counter)s ta natija"
+
+#, python-format
+msgid "%(full_result_count)s total"
+msgstr "jami %(full_result_count)s ta"
+
+msgid "Save as new"
+msgstr "Yangi sifatida saqlash"
+
+msgid "Save and add another"
+msgstr "Saqlab, yana qo‘shish"
+
+msgid "Save and continue editing"
+msgstr "Saqlab, tahrirlashda davom etish"
+
+msgid "Save and view"
+msgstr "Saqlab, ko‘rish"
+
+msgid "Close"
+msgstr "Yopish"
+
+#, python-format
+msgid "Change selected %(model)s"
+msgstr "Tanlangan %(model)s — tahrirlash"
+
+#, python-format
+msgid "Add another %(model)s"
+msgstr "Yana %(model)s qo‘shish"
+
+#, python-format
+msgid "Delete selected %(model)s"
+msgstr "Tanlangan %(model)s — o‘chirish"
+
+msgid "Log in again"
+msgstr "Qayta kirish"
+
+msgid "Password change"
+msgstr "Parolni o‘zgartirish"
+
+msgid "Your password was changed."
+msgstr "Parolingiz o‘zgartirildi."
+
+msgid "Change my password"
+msgstr "Parolimni o‘zgartirish"
+
+msgid "New password:"
+msgstr "Yangi parol:"
+
+msgid "Confirm password:"
+msgstr "Parolni tasdiqlang:"
+
+#, python-format
+msgid "Select %s to change"
+msgstr "%s ro‘yxati"
+
+#, python-format
+msgid "Select %s to view"
+msgstr "%s ro‘yxati"
+
+#, python-format
+msgid "Select %s"
+msgstr "%s tanlang"
+
+#, python-format
+msgid "Add %s"
+msgstr "%s qo‘shish"
+
+#, python-format
+msgid "Change %s"
+msgstr "%s tahrirlash"
+
+#, python-format
+msgid "View %s"
+msgstr "%s ko‘rish"
+
+#, python-format
+msgid "Add %(name)s"
+msgstr "%(name)s qo‘shish"
+
+msgid "Delete"
+msgstr "O‘chirish"
+
+#, python-format
+msgid "Delete selected %(verbose_name_plural)s"
+msgstr "Tanlangan %(verbose_name_plural)s — o‘chirish"
+
+msgid "Are you sure?"
+msgstr "Ishonchingiz komilmi?"
+
+msgid "Save"
+msgstr "Saqlash"
+
+msgid "Search"
+msgstr "Qidirish"
+
+msgid "Filter"
+msgstr "Filtr"
+
+msgid "Change"
+msgstr "Tahrirlash"
+
+msgid "View"
+msgstr "Ko‘rish"
+
+msgid "Add"
+msgstr "Qo‘shish"
+
+msgid "Log out"
+msgstr "Chiqish"
+
+msgid "Change password"
+msgstr "Parolni o‘zgartirish"
+
+msgid "View site"
+msgstr "Saytni ochish"
+
+msgid "Welcome,"
+msgstr "Xush kelibsiz,"
+
+msgid "Recent actions"
+msgstr "So‘nggi amallar"
+
+msgid "My actions"
+msgstr "Mening amallarim"
+
+msgid "Add row"
+msgstr "Qator qo‘shish"
+
+msgid "Add new item"
+msgstr "Yangi qo‘shish"
+
+msgid "All"
+msgstr "Hammasi"
+
+msgid "All applications"
+msgstr "Barcha bo‘limlar"
+
+msgid "Apply Filters"
+msgstr "Filtrlash"
+
+#, python-format
+msgid "By %(filter_title)s"
+msgstr "%(filter_title)s bo‘yicha"
+
+msgid "Change History"
+msgstr "O‘zgarishlar tarixi"
+
+msgid "Changed by"
+msgstr "O‘zgartirdi"
+
+msgid "Changes"
+msgstr "O‘zgarishlar"
+
+msgid "Choose file to upload"
+msgstr "Fayl tanlang"
+
+msgid "Click to download"
+msgstr "Yuklab olish"
+
+msgid "Collapse"
+msgstr "Yig‘ish"
+
+msgid "Date"
+msgstr "Sana"
+
+msgid "Date from"
+msgstr "Sanadan"
+
+msgid "Date to"
+msgstr "Sanagacha"
+
+msgid "Default"
+msgstr "Standart"
+
+msgid "Delete?"
+msgstr "O‘chirilsinmi?"
+
+msgid "Edit"
+msgstr "Tahrirlash"
+
+msgid "Errors"
+msgstr "Xatolar"
+
+msgid "Expand row"
+msgstr "Qatorni ochish"
+
+msgid "Export"
+msgstr "Eksport"
+
+msgid "False"
+msgstr "Yo‘q"
+
+msgid "Filters"
+msgstr "Filtrlar"
+
+msgid "From"
+msgstr "Dan"
+
+msgid "General"
+msgstr "Umumiy"
+
+msgid "Go back"
+msgstr "Ortga"
+
+msgid "Hide counts"
+msgstr "Sonlarni yashirish"
+
+msgid "Image preview"
+msgstr "Rasmni ko‘rish"
+
+msgid "Import"
+msgstr "Import"
+
+msgid "Loading more results..."
+msgstr "Yuklanmoqda..."
+
+msgid "Modified"
+msgstr "O‘zgartirilgan"
+
+msgid "More actions"
+msgstr "Boshqa amallar"
+
+msgid "Name"
+msgstr "Nomi"
+
+msgid "New"
+msgstr "Yangi"
+
+msgid "Next"
+msgstr "Keyingi"
+
+msgid "No"
+msgstr "Yo‘q"
+
+msgid "No data"
+msgstr "Ma’lumot yo‘q"
+
+msgid "No recent searches"
+msgstr "Oxirgi qidiruvlar yo‘q"
+
+msgid "No results found"
+msgstr "Hech narsa topilmadi"
+
+msgid "No results matching your query"
+msgstr "So‘rovingiz bo‘yicha hech narsa topilmadi"
+
+msgid "None"
+msgstr "Yo‘q"
+
+msgid "Not enough data."
+msgstr "Ma’lumot yetarli emas."
+
+msgid "Object"
+msgstr "Yozuv"
+
+msgid "Previous"
+msgstr "Oldingi"
+
+msgid "Recent searches"
+msgstr "Oxirgi qidiruvlar"
+
+msgid "Remove"
+msgstr "Olib tashlash"
+
+msgid "Remove from sorting"
+msgstr "Saralashdan olib tashlash"
+
+msgid "Reset filters"
+msgstr "Filtrlarni tozalash"
+
+msgid "Reset to default"
+msgstr "Standartga qaytarish"
+
+msgid "Return to site"
+msgstr "Saytga qaytish"
+
+msgid "Row"
+msgstr "Qator"
+
+msgid "Run"
+msgstr "Bajarish"
+
+msgid "Run the selected action"
+msgstr "Tanlangan amalni bajarish"
+
+msgid "Search apps and models..."
+msgstr "Bo‘limlardan qidirish..."
+
+msgid "Select action"
+msgstr "Amalni tanlang"
+
+msgid "Select action to run"
+msgstr "Bajariladigan amalni tanlang"
+
+msgid "Select all objects on this page for an action"
+msgstr "Sahifadagi barcha qatorlarni tanlash"
+
+msgid "Select all rows"
+msgstr "Barcha qatorlarni tanlash"
+
+msgid "Select record"
+msgstr "Qatorni tanlash"
+
+msgid "Select value"
+msgstr "Tanlang"
+
+msgid "Show counts"
+msgstr "Sonlarni ko‘rsatish"
+
+msgid "Submit"
+msgstr "Yuborish"
+
+msgid "Summary"
+msgstr "Xulosa"
+
+msgid "Time"
+msgstr "Vaqt"
+
+msgid "To"
+msgstr "Gacha"
+
+msgid "True"
+msgstr "Ha"
+
+msgid "Type to search"
+msgstr "Qidirish..."
+
+msgid "Unknown"
+msgstr "Noma’lum"
+
+msgid "Update"
+msgstr "Yangilash"
+
+msgid "Value"
+msgstr "Qiymat"
+
+msgid "View on site"
+msgstr "Saytda ko‘rish"
+
+#, python-format
+msgid "View selected %(model)s"
+msgstr "Tanlangan %(model)s — ko‘rish"
+
+msgid "Welcome"
+msgstr "Xush kelibsiz"
+
+msgid "Welcome back to"
+msgstr "Xush kelibsiz:"
+
+msgid "Yes"
+msgstr "Ha"
+
+msgid "This page yielded into no results. Create a new item or reset your filters."
+msgstr "Hech narsa topilmadi. Yangi yozuv qo‘shing yoki filtrlarni tozalang."
+
+msgid "You have been successfully logged out from the administration"
+msgstr "Tizimdan chiqdingiz"
+
+msgid "Dark"
+msgstr "Qorong‘i"
+
+msgid "Light"
+msgstr "Yorug‘"
+
+msgid "System"
+msgstr "Tizim"

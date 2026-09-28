@@ -1,3 +1,100 @@
-{% extends 'unfold/layouts/base.html' %}{% load money %}
-{% block content %}<div class="p-6"><h1 class="text-2xl font-semibold mb-4">Referal havolalar</h1><p class="mb-6">Havola orqali birinchi marta ro‘yxatdan o‘tgan mijoz sotuvchiga biriktiriladi. Tasdiqlangan to‘lovlar maosh hisobiga qo‘shiladi.</p>
-{% for row in rows %}<article class="border rounded p-6 mb-4"><h2 class="font-semibold">{{ row.name }}</h2><input class="border rounded p-2 w-full my-3" readonly aria-label="{{ row.name }} referal havolasi" value="{{ row.link }}" onclick="this.select()"><p>Ro‘yxatdan o‘tgan: {{ row.registrations }} · Xarid: {{ row.sales }} · Sotuv summasi: {{ row.sales_amount|money }} so‘m · To‘langan: {{ row.paid|money }} so‘m</p></article>{% empty %}<p>Sotuvchi topilmadi.</p>{% endfor %}</div>{% endblock %}
+{% extends 'unfold/layouts/base.html' %}
+{% load money %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block content %}
+<style>
+    .ref-link { height: 34px; border-radius: 8px; padding: 0 10px; font-size: 13px; min-width: 0; }
+    .ref-copy { height: 34px; border-radius: 8px; padding: 0 10px; font-size: 13px; font-weight: 600; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+    .ref-copy.is-copied { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+    .ref-icon { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 999px; flex-shrink: 0; }
+</style>
+
+<div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-6">
+    <div class="flex flex-col gap-1">
+        <h1 class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark">Referal havolalar</h1>
+        <p class="text-sm text-base-500 mb-0">Havola orqali birinchi marta ro‘yxatdan o‘tgan mijoz sotuvchiga biriktiriladi. Sotuv summasi — barcha chegirmalardan keyingi narx; to‘langan summa maosh hisobiga qo‘shiladi.</p>
+    </div>
+
+    {% if rows|length > 1 %}
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800">
+            <span class="ref-icon bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300"><span class="material-symbols-outlined" aria-hidden="true">person_add</span></span>
+            <div><p class="text-sm text-base-500 mb-0">Ro‘yxatdan o‘tganlar</p><div class="font-semibold text-xl text-font-important-light dark:text-font-important-dark">{{ totals.registrations }}</div></div>
+        </div>
+        <div class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800">
+            <span class="ref-icon bg-base-100 text-base-600 dark:bg-base-800 dark:text-base-300"><span class="material-symbols-outlined" aria-hidden="true">shopping_bag</span></span>
+            <div><p class="text-sm text-base-500 mb-0">Xaridlar</p><div class="font-semibold text-xl text-font-important-light dark:text-font-important-dark">{{ totals.sales }}</div></div>
+        </div>
+        <div class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800">
+            <span class="ref-icon" style="background: #e0f7f9; color: #0b6f7c;"><span class="material-symbols-outlined" aria-hidden="true">sell</span></span>
+            <div class="min-w-0"><p class="text-sm text-base-500 mb-0">Sotuv summasi</p><div class="font-semibold text-xl text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ totals.sales_amount|money }} <span class="text-xs font-normal text-base-500">UZS</span></div></div>
+        </div>
+        <div class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800">
+            <span class="ref-icon" style="background: #dcfce7; color: #166534;"><span class="material-symbols-outlined" aria-hidden="true">payments</span></span>
+            <div class="min-w-0"><p class="text-sm text-base-500 mb-0">To‘langan</p><div class="font-semibold text-xl text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ totals.paid|money }} <span class="text-xs font-normal text-base-500">UZS</span></div></div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="bg-white rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800 overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-base-200 dark:border-base-800 text-left text-xs uppercase text-base-500">
+                    <th class="py-3 px-5 font-medium">Sotuvchi</th>
+                    <th class="py-3 px-5 font-medium" style="min-width: 260px;">Referal havola</th>
+                    <th class="py-3 px-5 font-medium text-right">Ro‘yxatdan o‘tgan</th>
+                    <th class="py-3 px-5 font-medium text-right">Xaridlar</th>
+                    <th class="py-3 px-5 font-medium text-right">Sotuv summasi (UZS)</th>
+                    <th class="py-3 px-5 font-medium text-right">To‘langan (UZS)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr class="border-b border-base-200 dark:border-base-800 last:border-0 hover:bg-base-50 dark:hover:bg-base-800">
+                    <td class="py-3 px-5 font-medium text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ row.name }}</td>
+                    <td class="py-3 px-5">
+                        <div class="flex items-center gap-2">
+                            <input class="ref-link grow border border-base-200 bg-base-50 dark:bg-base-800 dark:border-base-700 text-base-600 dark:text-base-300" readonly aria-label="{{ row.name }} referal havolasi" value="{{ row.link }}" onclick="this.select()">
+                            {% if 'https://' in row.link %}
+                            <button type="button" class="ref-copy border border-base-200 dark:border-base-700 text-base-700 dark:text-base-300 hover:bg-base-100 dark:hover:bg-base-800" data-copy="{{ row.link }}">
+                                <span class="material-symbols-outlined" style="font-size: 16px;" aria-hidden="true">content_copy</span><span data-copy-label>Nusxalash</span>
+                            </button>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td class="py-3 px-5 text-right">{{ row.registrations }}</td>
+                    <td class="py-3 px-5 text-right">{{ row.sales }}</td>
+                    <td class="py-3 px-5 text-right whitespace-nowrap">{{ row.sales_amount|money }}</td>
+                    <td class="py-3 px-5 text-right font-semibold text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ row.paid|money }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="py-12 px-5 text-center text-base-500">Sotuvchi topilmadi.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+document.querySelectorAll('[data-copy]').forEach(function (button) {
+    button.addEventListener('click', function () {
+        var label = button.querySelector('[data-copy-label]');
+        var done = function () {
+            button.classList.add('is-copied');
+            label.textContent = 'Nusxalandi';
+            setTimeout(function () { button.classList.remove('is-copied'); label.textContent = 'Nusxalash'; }, 1600);
+        };
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(button.dataset.copy).then(done);
+        } else {
+            var input = button.parentElement.querySelector('input');
+            input.select();
+            document.execCommand('copy');
+            done();
+        }
+    });
+});
+</script>
+{% endblock %}

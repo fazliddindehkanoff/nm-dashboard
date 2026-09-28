@@ -1,5 +1,5 @@
 {% extends 'unfold/layouts/base.html' %}
-{% load i18n unfold %}
+{% load money i18n unfold %}
 
 {% block breadcrumbs %}{% endblock %}
 
@@ -89,7 +89,7 @@
             <div>
                 <p class="leading-relaxed mb-0 text-sm">Jami Tushum</p>
                 <div class="font-semibold text-2xl text-font-important-light tracking-tight dark:text-font-important-dark mt-0.5">
-                    {{ total_collected_all|floatformat:0|default:"0" }} <span class="text-sm font-normal text-base-500">UZS</span>
+                    {{ total_collected_all|money }} <span class="text-sm font-normal text-base-500">UZS</span>
                 </div>
             </div>
         </div>
@@ -101,7 +101,7 @@
             <div>
                 <p class="leading-relaxed mb-0 text-sm">Jami Maosh</p>
                 <div class="font-semibold text-2xl text-font-important-light dark:text-font-important-dark tracking-tight mt-0.5">
-                    {{ total_salary|floatformat:0|default:"0" }} <span class="text-sm font-normal text-base-500">UZS</span>
+                    {{ total_salary|money }} <span class="text-sm font-normal text-base-500">UZS</span>
                 </div>
             </div>
         </div>
@@ -128,13 +128,13 @@
                     <tr class="border-b border-base-200 dark:border-base-800 last:border-0 hover:bg-base-50 dark:hover:bg-base-800/50">
                         <td class="py-3 px-6 text-font-important-light dark:text-font-important-dark">{{ row.operator.full_name }}</td>
                         <td class="py-3 px-6 text-right">{{ row.sales_count }} ta</td>
-                        <td class="py-3 px-6 text-right">{{ row.total_collected|floatformat:2 }}</td>
+                        <td class="py-3 px-6 text-right">{{ row.total_collected|money }}</td>
                         <td class="py-3 px-6 text-right">
                             <span class="bg-base-100 font-medium text-font-important-light px-2 py-1 rounded-default text-xs dark:text-font-important-dark dark:bg-base-800">
                                 {{ row.percentage }}%
                             </span>
                         </td>
-                        <td class="py-3 px-6 text-right font-semibold text-base-700 dark:text-base-300">{{ row.salary|floatformat:2 }}</td>
+                        <td class="py-3 px-6 text-right font-semibold text-base-700 dark:text-base-300">{{ row.salary|money }}</td>
                     </tr>
                     {% empty %}
                     <tr>

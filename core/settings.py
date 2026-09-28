@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -155,6 +156,9 @@ TIME_ZONE = 'Asia/Tashkent'
 
 USE_I18N = True
 
+# Uzbek wording for Django admin and Unfold strings that ship untranslated.
+LOCALE_PATHS = [BASE_DIR / 'locale']
+
 USE_TZ = True
 
 
@@ -236,6 +240,15 @@ def _is_payments_view(request):
     )
 
 
+def _asset_version(relative_path):
+    try:
+        return hashlib.sha256((BASE_DIR / relative_path).read_bytes()).hexdigest()[:10]
+    except OSError:
+        return "0"
+
+
+_ADMIN_EXTRA_CSS_VERSION = _asset_version("main/static/main/css/admin-extra.css")
+
 UNFOLD = {
     "SITE_TITLE": "Norbekov Markazi",
     "SITE_HEADER": "Norbekov Markazi",
@@ -249,6 +262,9 @@ UNFOLD = {
         "dark": "/static/main/brand/norbekov-mark.svg",
     },
     "DASHBOARD_CALLBACK": "main.views.dashboard_callback",
+    # Utilities the custom admin templates use but Unfold does not ship; the
+    # content hash busts the long-lived static cache after each change.
+    "STYLES": [lambda request: f"/static/main/css/admin-extra.css?v={_ADMIN_EXTRA_CSS_VERSION}"],
     # DIQQAT: unfold 0.67 bu qiymatlarni to'g'ridan-to'g'ri `var(--color-primary-600)`
     # ichiga qo'yadi va CSS rangi sifatida ishlatadi. Shuning uchun ular haqiqiy CSS
     # rangi bo'lishi shart — "82 82 82" ko'rinishidagi RGB triplet brauzer tomonidan
@@ -294,16 +310,10 @@ UNFOLD = {
                 "separator": True,
                 "items": [
                     {
-                        "title": "Dashboard",
+                        "title": "Bosh sahifa",
                         "icon": "dashboard",
                         "link": "/admin/",
                         "permission": "main.permissions.can_access_dashboard",
-                    },
-                    {
-                        "title": "Maosh hisob-kitobi",
-                        "icon": "payments",
-                        "link": "/salaries/",
-                        "permission": "main.permissions.can_access_salaries",
                     },
                     {
                         "title": "QR skaner",
@@ -314,14 +324,14 @@ UNFOLD = {
                 ],
             },
             {
-                "title": "Ma'lumotlar",
+                "title": "O'quv jarayoni",
                 "separator": True,
                 "items": [
                     {
-                        "title": "Kurslar",
-                        "icon": "school",
-                        "link": "/admin/main/course/",
-                        "permission": "main.permissions.can_view_courses",
+                        "title": "Mijozlar",
+                        "icon": "people",
+                        "link": "/admin/main/client/",
+                        "permission": "main.permissions.can_view_clients",
                     },
                     {
                         "title": "Guruhlar",
@@ -330,64 +340,16 @@ UNFOLD = {
                         "permission": "main.permissions.can_view_groups",
                     },
                     {
-                        "title": "Mijozlar",
-                        "icon": "people",
-                        "link": "/admin/main/client/",
-                        "permission": "main.permissions.can_view_clients",
+                        "title": "Davomat",
+                        "icon": "fact_check",
+                        "link": "/admin/main/attendancerecord/",
+                        "permission": "main.permissions.can_view_attendance",
                     },
                     {
-                        "title": "Telegram foydalanuvchilar",
-                        "icon": "send",
-                        "link": "/admin/main/telegramuser/",
-                        "permission": "main.permissions.can_manage_users",
-                    },
-                    {
-                        "title": "Reklama va xabarlar",
-                        "icon": "campaign",
-                        "link": "/admin/main/telegramcampaign/",
-                        "permission": "main.permissions.can_manage_users",
-                    },
-                    {
-                        "title": "Mini App xaridlari",
-                        "icon": "shopping_bag",
-                        "link": "/admin/main/miniapppurchase/",
-                        "permission": "main.permissions.can_manage_users",
-                    },
-                    {
-                        "title": "Web app savati",
-                        "icon": "shopping_cart",
-                        "link": "/admin/main/miniappcartitem/",
-                        "permission": "main.permissions.can_manage_users",
-                    },
-                    {
-                        "title": "Yuridik roziliklar",
-                        "icon": "verified_user",
-                        "link": "/admin/main/legalacceptance/",
-                        "permission": "main.permissions.can_manage_users",
-                    },
-                    {
-                        "title": "Foydalanuvchilar",
-                        "icon": "manage_accounts",
-                        "link": "/admin/main/operator/",
-                        "permission": "main.permissions.can_manage_users",
-                    },
-                    {
-                        "title": "Rollar va ruxsatlar",
-                        "icon": "shield_person",
-                        "link": "/admin/main/roleconfiguration/",
-                        "permission": "main.permissions.can_manage_users",
-                    },
-                    {
-                        "title": "To'lov sozlamalari",
-                        "icon": "settings",
-                        "link": "/admin/main/paymentsettings/",
-                        "permission": "main.permissions.can_view_payment_settings",
-                    },
-                    {
-                        "title": "Chegirmalar",
-                        "icon": "sell",
-                        "link": "/admin/main/discount/",
-                        "permission": "main.permissions.can_view_discounts",
+                        "title": "Kurslar",
+                        "icon": "school",
+                        "link": "/admin/main/course/",
+                        "permission": "main.permissions.can_view_courses",
                     },
                 ],
             },
@@ -395,7 +357,6 @@ UNFOLD = {
                 "title": "Moliya",
                 "separator": True,
                 "items": [
-                    {"title": "Referal havolalar", "icon": "link", "link": "/referrals/", "permission": "main.permissions.can_view_referrals"},
                     {
                         "title": "To'lovlar",
                         "icon": "payments",
@@ -414,6 +375,84 @@ UNFOLD = {
                         "icon": "receipt_long",
                         "link": "/admin/main/expense/",
                         "permission": "main.permissions.can_view_expenses",
+                    },
+                    {
+                        "title": "Maosh hisob-kitobi",
+                        "icon": "request_quote",
+                        "link": "/salaries/",
+                        "permission": "main.permissions.can_access_salaries",
+                    },
+                    {
+                        "title": "Referal havolalar",
+                        "icon": "link",
+                        "link": "/referrals/",
+                        "permission": "main.permissions.can_view_referrals",
+                    },
+                ],
+            },
+            {
+                "title": "Web app (Telegram)",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Xaridlar",
+                        "icon": "shopping_bag",
+                        "link": "/admin/main/miniapppurchase/",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                    {
+                        "title": "Savatdagi kurslar",
+                        "icon": "shopping_cart",
+                        "link": "/admin/main/miniappcartitem/",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                    {
+                        "title": "Telegram foydalanuvchilar",
+                        "icon": "send",
+                        "link": "/admin/main/telegramuser/",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                    {
+                        "title": "Reklama va xabarlar",
+                        "icon": "campaign",
+                        "link": "/admin/main/telegramcampaign/",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                    {
+                        "title": "Yuridik roziliklar",
+                        "icon": "verified_user",
+                        "link": "/admin/main/legalacceptance/",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                ],
+            },
+            {
+                "title": "Sozlamalar",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Chegirmalar",
+                        "icon": "sell",
+                        "link": "/admin/main/discount/",
+                        "permission": "main.permissions.can_view_discounts",
+                    },
+                    {
+                        "title": "To'lov sozlamalari",
+                        "icon": "tune",
+                        "link": "/admin/main/paymentsettings/",
+                        "permission": "main.permissions.can_view_payment_settings",
+                    },
+                    {
+                        "title": "Foydalanuvchilar",
+                        "icon": "manage_accounts",
+                        "link": "/admin/main/operator/",
+                        "permission": "main.permissions.can_manage_users",
+                    },
+                    {
+                        "title": "Rollar va ruxsatlar",
+                        "icon": "shield_person",
+                        "link": "/admin/main/roleconfiguration/",
+                        "permission": "main.permissions.can_manage_users",
                     },
                 ],
             },

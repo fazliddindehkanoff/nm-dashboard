@@ -110,7 +110,11 @@ def referrals(request):
                      'sales': sold.count(),
                      'sales_amount': sum((purchase.sale_amount for purchase in sold), Decimal(0)),
                      'paid': Decimal(invoices.aggregate(total=Sum('amount'))['total'] or 0) / 100})
-    return render(request, 'admin/main/referrals.html', {**admin.site.each_context(request), 'title': 'Referal havolalar', 'rows': rows})
+    rows.sort(key=lambda row: (-row['paid'], -row['sales'], -row['registrations'], row['name']))
+    totals = {key: sum((row[key] for row in rows), Decimal(0) if key in ('paid', 'sales_amount') else 0)
+              for key in ('registrations', 'sales', 'sales_amount', 'paid')}
+    return render(request, 'admin/main/referrals.html', {**admin.site.each_context(request), 'title': 'Referal havolalar',
+                                                         'rows': rows, 'totals': totals})
 
 
 @staff_member_required
@@ -162,14 +166,27 @@ def payments(request):
             method='Rahmat', status={'success':'success', 'revert':'refunded', 'error':'failed'}.get(item.state,'pending'),
             source='Web App', reference=f'R-{item.pk}', link=reverse('admin:main_miniapppurchase_change', args=[item.purchase_id]) if request.user.has_perm('main.view_miniapppurchase') else ''))
     labels = {'pending': 'Kutilmoqda', 'success': 'Tasdiqlangan', 'failed': 'Rad etilgan / xato', 'refunded': 'Qaytarilgan'}
-    rows = [row for row in rows if (not status or row['status'] == status) and (not search or search in f"{row['name']} {row['course']} {row['reference']}".casefold())]
+    rows = [row for row in rows if not search or search in f"{row['name']} {row['course']} {row['reference']}".casefold()]
+    # Tab counts and sums follow every filter except the status tab itself.
+    summary = {key: {'count': 0, 'amount': Decimal(0)} for key in labels}
+    for row in rows:
+        summary[row['status']]['count'] += 1
+        summary[row['status']]['amount'] += row['amount']
+    web_app_total = sum((row['amount'] for row in rows if row['status'] == 'success' and row['source'] == 'Web App'), Decimal(0))
+    rows = [row for row in rows if not status or row['status'] == status]
     rows.sort(key=lambda row: row['sort'], reverse=True)
     total = sum((row['amount'] for row in rows if row['status'] == 'success'), Decimal(0))
     for row in rows: row['status_label'] = labels[row['status']]
     query = request.GET.copy(); query.pop('page', None)
+    tab_query = request.GET.copy(); tab_query.pop('page', None); tab_query.pop('status', None)
+    tabs = [{'value': '', 'label': 'Hammasi', 'count': sum(item['count'] for item in summary.values())}] + [
+        {'value': key, 'label': label, 'count': summary[key]['count']} for key, label in labels.items()
+    ]
     return render(request, 'admin/main/payments.html', {**admin.site.each_context(request), 'title': 'To‘lovlar',
         'page': Paginator(rows, 50).get_page(request.GET.get('page')), 'total': total, 'methods': PAYMENT_METHODS,
         'statuses': labels.items(), 'selected_method': method, 'selected_status': status, 'query': query.urlencode(),
+        'tab_query': tab_query.urlencode(), 'tabs': tabs, 'summary': summary, 'web_app_total': web_app_total,
+        'has_filters': any(request.GET.get(key) for key in ('q', 'method', 'from', 'to')),
         'can_add': request.user.has_perm('main.add_transaction')})
 
 

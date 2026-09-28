@@ -1,5 +1,5 @@
 {% extends 'unfold/layouts/base.html' %}
-{% load i18n unfold %}
+{% load money i18n unfold %}
 
 {% block breadcrumbs %}{% endblock %}
 
@@ -157,7 +157,7 @@
                             </span>
                             {% else %}{{ tx.operator.full_name|default:"—" }}{% endif %}
                         </td>
-                        <td class="py-3 px-6 text-right font-medium text-font-important-light dark:text-font-important-dark">{{ tx.amount|floatformat:0 }}</td>
+                        <td class="py-3 px-6 text-right font-medium text-font-important-light dark:text-font-important-dark">{{ tx.amount|money }}</td>
                         <td class="py-3 px-6">{{ tx.get_payment_type_display }}</td>
                         <td class="py-3 px-6">
                             {% if tx.is_refunded %}
