@@ -48,6 +48,15 @@
   };
   const initials = name => (name || 'N').split(/\s+/).slice(0, 2).map(v => v[0]).join('').toUpperCase();
   const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+  // Group covers uploaded in the CRM; a missing file simply hides the image.
+  function setBanner(node, url, alt) {
+    node.hidden = !url;
+    node.onerror = () => { node.hidden = true; };
+    if (url) {
+      node.alt = alt;
+      if (node.getAttribute('src') !== url) node.src = url;
+    } else node.removeAttribute('src');
+  }
   const csrf = $('meta[name="csrf-token"]').content;
 
   function headers(json = false) {
@@ -262,7 +271,8 @@
         const hint = bestDiscountHint(group.course);
         const label = !group.can_purchase ? 'Qabul yopilgan' : inCart ? '✓ Savatda' : 'Savatga qo‘shish';
         return `
-        <li class="schedule-row${inCart && group.can_purchase ? ' is-in-cart' : ''}" data-group-id="${group.id}">
+        <li class="schedule-row${inCart && group.can_purchase ? ' is-in-cart' : ''}${group.banner_url ? ' has-banner' : ''}" data-group-id="${group.id}">
+          ${group.banner_url ? `<img class="schedule-row__banner" src="${escapeHtml(group.banner_url)}" alt="${escapeHtml(group.course.name)} — ${formatDate(group.start_date)}" loading="lazy" decoding="async">` : ''}
           <div class="schedule-row__teacher"><small>O‘qituvchi</small><strong>${escapeHtml(group.teachers?.join(', ') || 'Tez orada e’lon qilinadi')}</strong></div>
           <div class="schedule-row__course"><small>Mashg‘ulot</small><h3>${escapeHtml(group.course.name)}</h3><span class="schedule-row__status ${group.can_purchase ? 'is-open' : ''}">${group.can_purchase ? 'Qabul ochiq' : 'Boshlangan'}</span>${hint && group.can_purchase ? `<span class="schedule-row__offer">${escapeHtml(hint)}</span>` : ''}</div>
           <div class="schedule-row__date"><small>Boshlanish</small><time datetime="${group.start_date}">${formatDate(group.start_date)}</time><span>${group.number_of_days} kunlik dars</span></div>
@@ -270,6 +280,10 @@
         </li>`;
       }).join('')}</ul>` : '<div class="schedule-empty"><h3>Hozircha faol guruh yo‘q</h3><p>Yangi guruh ochilganda jadval shu yerda paydo bo‘ladi.</p></div>';
     $$('[data-course-id]', $('#courseList')).forEach(button => button.addEventListener('click', () => startCheckout(Number(button.dataset.courseId), 'coursesView', Number(button.dataset.startGroup))));
+    $$('.schedule-row__banner', $('#courseList')).forEach(image => image.addEventListener('error', () => {
+      image.closest('.schedule-row').classList.remove('has-banner');
+      image.remove();
+    }));
   }
 
   function renderMyCourses() {
@@ -327,6 +341,7 @@
     state.selectedCourse = course;
     const awaiting = course.assignment_status === 'awaiting_group';
     $('#courseDetailTitle').textContent = course.course;
+    setBanner($('#courseDetailBanner'), course.banner_url, course.course);
     const stateNode = $('#courseDetailState');
     stateNode.textContent = awaiting ? 'Guruh kutilmoqda' : course.is_active ? 'Faol guruh' : 'Yakunlangan';
     stateNode.className = `course-state course-state--${awaiting ? 'waiting' : course.is_active ? 'active' : 'complete'}`;
@@ -398,6 +413,8 @@
   function renderGroupOptions() {
     const groupId = state.config.groupId;
     const groups = openGroups(state.course);
+    const selected = groups.find(group => group.id === groupId);
+    setBanner($('#checkoutBanner'), selected?.banner_url, `${state.course.name} — ${selected ? formatDate(selected.start_date) : ''}`);
     $('#groupCount').textContent = `${groups.length} ta guruh`;
     $('#groupOptions').innerHTML = groups.map((group, index) => {
       const selected = group.id === groupId;

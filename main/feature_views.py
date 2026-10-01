@@ -10,7 +10,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import PermissionDenied
-from django.core.files.storage import FileSystemStorage
+from django.core.files.storage import FileSystemStorage, default_storage
 from django.core.paginator import Paginator
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
@@ -192,13 +192,23 @@ def payments(request):
 
 def group_banner(request, banner_path):
     """Serve only published group images; private documents never use MEDIA_URL."""
+    from django.http import Http404
     from .models import Group
-    group = get_object_or_404(Group.objects.exclude(banner=''), banner=f'group_banners/{banner_path}')
+    from .services.images import web_banner_copy
+    group = Group.objects.exclude(banner='').filter(banner=f'group_banners/{banner_path}').first()
+    if group is None:
+        raise Http404
     try:
-        response = FileResponse(group.banner.open('rb'))
+        copy = None
+        if request.GET.get('web'):
+            # The web app asks for a phone-sized copy; its URL changes with the file.
+            try:
+                copy = default_storage.open(web_banner_copy(group.banner), 'rb')
+            except (UnidentifiedImageError, Image.DecompressionBombError):
+                copy = None  # An unusual image is served as uploaded.
+        response = FileResponse(copy or group.banner.open('rb'))
     except FileNotFoundError:
-        from django.http import Http404
         raise Http404 from None
-    response['Cache-Control'] = 'public, max-age=300'
+    response['Cache-Control'] = 'public, max-age=604800' if copy else 'public, max-age=300'
     response['X-Content-Type-Options'] = 'nosniff'
     return response

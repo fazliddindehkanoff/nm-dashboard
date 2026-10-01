@@ -30,6 +30,7 @@ from .models import (
     TelegramUser,
 )
 from .services.booking import booking_discount_for, check_payment_version, payment_amount
+from .services.images import web_banner_url
 from .services.legal import (
     TERMS_VERSION,
     contract_accepted,
@@ -245,7 +246,7 @@ def _is_demo_account(account):
 def _group_payload(group):
     return {
         'id': group.id,
-        'banner_url': group.banner.url if group.banner else '',
+        'banner_url': web_banner_url(group.banner) if group.banner else '',
         'start_date': group.start_date.isoformat(),
         'number_of_days': group.number_of_days,
         'teachers': [teacher.full_name for teacher in group.teachers.all()],
@@ -470,6 +471,7 @@ def _my_course_payloads(account, purchases):
             'purchase_id': None,
             'course_id': course.id,
             'course': course.name,
+            'banner_url': web_banner_url(group.banner) if group.banner else '',
             'start_date': group.start_date.isoformat(),
             'number_of_days': group.number_of_days,
             'is_active': group.is_active,
@@ -496,6 +498,7 @@ def _my_course_payloads(account, purchases):
             'purchase_id': purchase.id,
             'course_id': purchase.course_id,
             'course': purchase.course.name,
+            'banner_url': '',
             'start_date': '',
             'number_of_days': purchase.course.number_of_days,
             'is_active': True,
