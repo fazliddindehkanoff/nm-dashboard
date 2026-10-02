@@ -127,7 +127,7 @@ class WebAppCartTests(TestCase):
         proof = self.proof(self.account.phone_number)
         item = self.add(payment_mode='booking', eligibility_document_id=proof).json()['item_id']
         purchase = self.checkout(item).json()['purchases'][0]
-        self.assertTrue(purchase['can_return_to_cart'])
+        self.assertTrue(purchase['can_cancel'])
         self.post_json(reverse('main:telegram_app_accept_contract', args=[purchase['id']]),
                        {'accepted': True, 'version': BOOKING_CONTRACT_VERSION})
         returned = self.post_json(reverse('main:telegram_app_return_to_cart', args=[purchase['id']]), {})

@@ -43,7 +43,9 @@ from .services.legal import (
 from .services.mini_app import (
     CheckoutError,
     build_participants,
-    can_return_to_cart,
+    can_cancel,
+    cancel_older_unpaid,
+    cancel_purchase,
     checkout_cart,
     create_purchase,
     find_client_by_phone as _find_client_by_phone,
@@ -263,7 +265,7 @@ def _purchase_payload(purchase):
         'course_id': purchase.course_id,
         'group': _group_payload(purchase.group) if purchase.group else None,
         'checkout_batch': str(purchase.checkout_batch) if purchase.checkout_batch else '',
-        'can_return_to_cart': can_return_to_cart(purchase, invoices),
+        'can_cancel': can_cancel(purchase, invoices),
         'purchase_type': purchase.purchase_type,
         'purchase_type_label': purchase.get_purchase_type_display(),
         'unit_price': str(purchase.unit_price),
@@ -726,6 +728,7 @@ def telegram_app_create_purchase(request):
                 account, course, data.get('purchase_type'), participants, data.get('payment_mode', 'full'),
                 group=_upcoming_group(course, data.get('group_id')),
             )
+            cancel_older_unpaid(purchase)
         purchase = MiniAppPurchase.objects.select_related('course', 'group').prefetch_related('members').get(pk=purchase.pk)
         return JsonResponse({'ok': True, 'purchase': _purchase_payload(purchase)}, status=201)
     except Course.DoesNotExist:
@@ -808,6 +811,21 @@ def telegram_app_return_to_cart(request, purchase_id):
     except ValueError as exc:
         return JsonResponse({'ok': False, 'error': str(exc)}, status=409)
     return JsonResponse({'ok': True, 'cart': _cart_payload(account)})
+
+
+@require_POST
+def telegram_app_cancel_purchase(request, purchase_id):
+    account, error = _authenticate(request)
+    if error:
+        return error
+    purchase = _account_purchase(account, purchase_id)
+    if not purchase:
+        return JsonResponse({'ok': False, 'error': "Xarid topilmadi."}, status=404)
+    try:
+        cancel_purchase(purchase)
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=409)
+    return JsonResponse({'ok': True})
 
 
 def _selected_purchases(account, ids):

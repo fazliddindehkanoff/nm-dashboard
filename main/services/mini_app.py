@@ -229,7 +229,7 @@ def checkout_cart(account, items):
     return purchases
 
 
-def can_return_to_cart(purchase, invoices=None):
+def can_cancel(purchase, invoices=None):
     invoices = purchase.multicard_invoices.all() if invoices is None else invoices
     return (
         purchase.payment_status in (MiniAppPurchase.PAYMENT_PENDING, MiniAppPurchase.PAYMENT_FAILED)
@@ -246,11 +246,9 @@ def return_to_cart(purchase):
     """
     with db_transaction.atomic():
         purchase = MiniAppPurchase.objects.select_for_update().get(pk=purchase.pk)
-        if not can_return_to_cart(purchase):
+        if not can_cancel(purchase):
             raise ValueError("Bu xaridni savatga qaytarib bo'lmaydi. To'lov holatini tekshiring.")
-        MiniAppPurchase.objects.filter(pk=purchase.pk).update(
-            payment_status=MiniAppPurchase.PAYMENT_CANCELLED, updated_at=timezone.now(),
-        )
+        _close(purchase)
         existing = MiniAppCartItem.objects.filter(telegram_user=purchase.telegram_user, course=purchase.course).first()
         if existing:
             # The course was added again after checkout; keep the newer choice.
@@ -273,6 +271,33 @@ def return_to_cart(purchase):
             for member in members if member.relationship != MiniAppPurchaseMember.RELATION_SELF
         ])
     return item
+
+
+def _close(purchase):
+    MiniAppPurchase.objects.filter(pk=purchase.pk).update(
+        payment_status=MiniAppPurchase.PAYMENT_CANCELLED, updated_at=timezone.now(),
+    )
+
+
+def cancel_purchase(purchase):
+    """Cancel an unpaid purchase; a late payment is still recorded by the callback."""
+    with db_transaction.atomic():
+        purchase = MiniAppPurchase.objects.select_for_update().get(pk=purchase.pk)
+        if not can_cancel(purchase):
+            raise ValueError("Bu xaridni bekor qilib bo'lmaydi. To'lov holatini tekshiring.")
+        _close(purchase)
+
+
+def cancel_older_unpaid(purchase):
+    """Buying a course again replaces the buyer's earlier unpaid order for it."""
+    older = MiniAppPurchase.objects.select_for_update().filter(
+        telegram_user_id=purchase.telegram_user_id,
+        course_id=purchase.course_id,
+        payment_status__in=(MiniAppPurchase.PAYMENT_PENDING, MiniAppPurchase.PAYMENT_FAILED),
+    ).exclude(pk=purchase.pk).prefetch_related('multicard_invoices')
+    for item in older:
+        if can_cancel(item):
+            _close(item)
 
 
 def sync_group_payment(purchase):

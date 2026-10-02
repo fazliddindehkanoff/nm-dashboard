@@ -13,6 +13,7 @@ from .telegram_views import (
     telegram_app_create_purchase,
     telegram_app_remove_cart_item,
     telegram_app_return_to_cart,
+    telegram_app_cancel_purchase,
     telegram_app_save_cart_item,
     telegram_app_questionnaire,
     telegram_app_simulate_payment,
@@ -56,6 +57,11 @@ urlpatterns = [
         'telegram-app/api/purchases/<int:purchase_id>/return-to-cart/',
         telegram_app_return_to_cart,
         name='telegram_app_return_to_cart',
+    ),
+    path(
+        'telegram-app/api/purchases/<int:purchase_id>/cancel/',
+        telegram_app_cancel_purchase,
+        name='telegram_app_cancel_purchase',
     ),
     path('telegram-app/api/legal/terms/', telegram_app_terms, name='telegram_app_terms'),
     path(
