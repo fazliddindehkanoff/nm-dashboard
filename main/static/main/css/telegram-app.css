@@ -373,7 +373,9 @@ body.has-telegram-back .back-link { display: none; }
 .consent { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; color: #34495b; font-size: 14px; line-height: 1.45; }
 .consent input { width: 20px; height: 20px; flex: none; margin: 1px 0 0; accent-color: var(--lagoon); }
 
-/* ---- My courses */
+/* ---- Purchased courses, shown on the profile */
+.profile-section { margin-top: 28px; }
+.section-title { margin: 0 0 14px; color: var(--ink); font-family: var(--display); font-size: 24px; font-weight: 400; }
 .todo-list { display: grid; gap: 12px; margin-bottom: 24px; }
 .todo-list:empty { display: none; }
 .todo { padding: 16px; border-left: 4px solid #e09a1a; border-radius: var(--radius); background: var(--paper); box-shadow: var(--shadow); }
@@ -443,7 +445,7 @@ body.has-telegram-back .back-link { display: none; }
   width: min(520px, 100%);
   height: var(--tabbar);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   padding: 6px 12px env(safe-area-inset-bottom);
   border-top: 1px solid var(--line);
   background: rgba(255, 255, 255, .97);

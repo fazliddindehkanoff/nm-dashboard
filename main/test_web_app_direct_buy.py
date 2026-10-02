@@ -72,3 +72,6 @@ class DirectPurchaseTests(TestCase):
         self.assertContains(page, 'id="catalogView"')
         self.assertContains(page, 'Sotib olish')
         self.assertNotContains(page, 'Savat')
+        # Two tabs: the catalogue and the profile, which lists purchased courses.
+        self.assertEqual(page.content.decode().count('data-tab='), 2)
+        self.assertContains(page, 'Sotib olingan kurslar')

@@ -137,13 +137,13 @@
           </div>
           <p class="fine">Har bir ishtirokchining QR-kodi Telegram bot orqali yuboriladi.</p>
           <button class="btn btn--primary btn--wide" id="continueAfterPayment" type="button">Anketani to‘ldirish</button>
-          <button class="btn btn--quiet btn--wide" type="button" data-show-my-courses>Kurslarimga o‘tish</button>
+          <button class="btn btn--quiet btn--wide" type="button" data-show-profile>Kurslarimni ko‘rish</button>
         </div>
       </section>
 
       <section class="view" id="questionnaireView" aria-labelledby="questionnaireTitle">
         <div class="page">
-          <button class="back-link" type="button" data-back><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Kurslarim</button>
+          <button class="back-link" type="button" data-back><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Profil</button>
           <ol class="steps" aria-label="Xarid bosqichlari">
             <li class="is-done">Tanlov</li><li class="is-done">To‘lov</li><li class="is-current" aria-current="step">Anketa</li>
           </ol>
@@ -161,21 +161,13 @@
           <div class="result-mark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></svg></div>
           <h2 class="display" id="successTitle">Siz ro‘yxatdasiz</h2>
           <p class="lead" id="successDescription"></p>
-          <button class="btn btn--primary btn--wide" type="button" data-show-my-courses>Kurslarimga o‘tish</button>
-        </div>
-      </section>
-
-      <section class="view" id="myCoursesView" aria-labelledby="myCoursesTitle">
-        <div class="page">
-          <h1 class="display page-title" id="myCoursesTitle">Kurslarim</h1>
-          <div class="todo-list" id="todoList"></div>
-          <div class="my-courses" id="myCourseList"></div>
+          <button class="btn btn--primary btn--wide" type="button" data-show-profile>Kurslarimni ko‘rish</button>
         </div>
       </section>
 
       <section class="view" id="courseDetailView" aria-labelledby="courseDetailTitle">
         <div class="page">
-          <button class="back-link" type="button" data-back><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Kurslarim</button>
+          <button class="back-link" type="button" data-back><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Profil</button>
           <img class="banner" id="courseDetailBanner" alt="" decoding="async" hidden>
           <span class="state-tag" id="courseDetailState">Faol guruh</span>
           <h2 class="display" id="courseDetailTitle">Kurs</h2>
@@ -191,6 +183,11 @@
             <div class="profile-card__avatar" id="profileAvatar">N</div>
             <div><h3 id="profileName">—</h3><p id="profilePhone">—</p></div>
           </article>
+          <section class="profile-section" aria-labelledby="purchasedHeading">
+            <h2 class="section-title" id="purchasedHeading">Sotib olingan kurslar</h2>
+            <div class="todo-list" id="todoList"></div>
+            <div class="my-courses" id="myCourseList"></div>
+          </section>
           <div class="note">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></svg>
             <p><strong>Xabarlar Telegram orqali keladi</strong>To‘lov cheklari, QR-kodlar va darsdagi davomatingiz shu botga yuboriladi.</p>
@@ -233,11 +230,8 @@
       <button type="button" class="is-active" data-tab="catalog" aria-current="page">
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 7 9-4 9 4-9 4zM6 9.5V15c3.5 2.5 8.5 2.5 12 0V9.5M21 8v7"/></svg>Kurslar
       </button>
-      <button type="button" data-tab="my">
-        <span class="tabbar__icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3zM5 17a3 3 0 0 1 3-3h11"/></svg><b class="badge" id="todoBadge" hidden>0</b></span>Kurslarim
-      </button>
       <button type="button" data-tab="profile">
-        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 21c.8-4.3 3.3-6.5 7.5-6.5s6.7 2.2 7.5 6.5"/></svg>Profil
+        <span class="tabbar__icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 21c.8-4.3 3.3-6.5 7.5-6.5s6.7 2.2 7.5 6.5"/></svg><b class="badge" id="todoBadge" hidden>0</b></span>Profil
       </button>
     </nav>
   </div>

@@ -103,7 +103,7 @@
 
   // ---- Navigation: three tabs; every other screen has a way back
 
-  const TAB_OF_VIEW = { catalogView: 'catalog', myCoursesView: 'my', profileView: 'profile' };
+  const TAB_OF_VIEW = { catalogView: 'catalog', profileView: 'profile' };
 
   function showView(id, back = null) {
     $$('.view').forEach(node => node.classList.toggle('is-active', node.id === id));
@@ -125,8 +125,8 @@
   function goBack() { if (state.back) state.back(); }
 
   function showCatalog() { renderCatalog(); showView('catalogView'); }
-  function showMyCourses() { renderTodos(); renderMyCourses(); showView('myCoursesView'); }
-  function showProfile() { showView('profileView'); }
+  // The profile also lists purchased courses and unfinished orders.
+  function showProfile() { renderTodos(); renderMyCourses(); showView('profileView'); }
 
   // ---- Covers: an uploaded group photo, otherwise the brand's three circles
 
@@ -210,7 +210,7 @@
       $('#todoBannerText').textContent = purchase.course;
     } else {
       $('#todoBannerTitle').textContent = `${todos.length} ta buyurtma yakunlanmagan`;
-      $('#todoBannerText').textContent = 'Kurslarim bo‘limida davom ettiring';
+      $('#todoBannerText').textContent = 'Profil bo‘limida davom ettiring';
     }
   }
 
@@ -506,7 +506,7 @@
   async function openCheckout(purchase, fromCourse = false) {
     state.purchase = purchase;
     state.checkoutFromCourse = fromCourse;
-    $('#checkoutBackLabel').textContent = fromCourse ? 'Kursga qaytish' : 'Kurslarim';
+    $('#checkoutBackLabel').textContent = fromCourse ? 'Kursga qaytish' : 'Profil';
     const needsContract = !purchase.contract_accepted && !isFinished(purchase);
     if (needsContract) {
       try {
@@ -523,7 +523,7 @@
     $('#checkoutView .steps').hidden = Number(purchase.paid_amount) > 0;
     renderOrder(purchase);
     renderPayControls();
-    showView('checkoutView', fromCourse ? () => showView('courseView', showCatalog) : showMyCourses);
+    showView('checkoutView', fromCourse ? () => showView('courseView', showCatalog) : showProfile);
   }
 
   function renderOrder(purchase) {
@@ -722,7 +722,7 @@
       state.purchases = state.purchases.filter(item => item.id !== id);
       renderTodoIndicators();
       toast('Buyurtma bekor qilindi.');
-      if ($('#checkoutView').classList.contains('is-active')) showMyCourses(); else renderTodos();
+      if ($('#checkoutView').classList.contains('is-active')) showProfile(); else renderTodos();
     } catch (error) {
       toast(error.message, true);
     }
@@ -742,7 +742,7 @@
       const data = await api('/telegram-app/api/bootstrap/');
       Object.assign(state, { courses: data.courses, myCourses: data.my_courses || [], purchases: data.purchases });
       renderTodoIndicators();
-      if ($('#myCoursesView').classList.contains('is-active')) { renderTodos(); renderMyCourses(); }
+      if ($('#profileView').classList.contains('is-active')) { renderTodos(); renderMyCourses(); }
     } catch (_) {}
   }
 
@@ -753,7 +753,7 @@
     $('#paymentResultPaid').textContent = money(purchase.paid_amount);
     $('#paymentResultDebt').textContent = money(purchase.remaining_amount);
     $('#paymentResultNote').textContent = Number(purchase.remaining_amount) > 0
-      ? 'Bron qabul qilindi. Qolgan summani «Kurslarim» bo‘limidan istalgan vaqtda to‘lashingiz mumkin.'
+      ? 'Bron qabul qilindi. Qolgan summani «Profil» bo‘limidan istalgan vaqtda to‘lashingiz mumkin.'
       : 'Kurs uchun to‘lov to‘liq yakunlandi.';
     $('#continueAfterPayment').hidden = purchase.questionnaire_completed;
     showView('paymentResultView');
@@ -763,7 +763,7 @@
   function openQuestionnaire(purchase) {
     state.purchase = purchase;
     renderQuestionnaires();
-    showView('questionnaireView', showMyCourses);
+    showView('questionnaireView', showProfile);
   }
 
   function renderQuestionnaires() {
@@ -816,7 +816,7 @@
 
   function showSuccess(purchase) {
     $('#successDescription').textContent = Number(purchase.payable_amount) > 0
-      ? `Anketa qabul qilindi. Qolgan to‘lov: ${money(purchase.payable_amount)} — uni «Kurslarim» bo‘limidan to‘lashingiz mumkin.`
+      ? `Anketa qabul qilindi. Qolgan to‘lov: ${money(purchase.payable_amount)} — uni «Profil» bo‘limidan to‘lashingiz mumkin.`
       : 'To‘lov va anketa qabul qilindi. Kurs haqidagi xabarlar shu Telegram bot orqali keladi.';
     showView('successView');
     refreshAccount();
@@ -837,11 +837,12 @@
   function renderMyCourses() {
     const host = $('#myCourseList');
     if (!state.myCourses.length) {
-      host.innerHTML = todoPurchases().length ? '' : '<div class="empty"><h3>Hali kurs yo‘q</h3><p>Kursni tanlang — to‘lovdan keyin u shu yerda ko‘rinadi.</p><button type="button" class="btn btn--primary" data-open-catalog>Kurslarni ko‘rish</button></div>';
+      host.innerHTML = todoPurchases().length ? '' : '<div class="empty"><h3>Hali kurs sotib olinmagan</h3><p>Kursni tanlang — to‘lovdan keyin u shu yerda ko‘rinadi.</p><button type="button" class="btn btn--primary" data-open-catalog>Kurslarni ko‘rish</button></div>';
       $('[data-open-catalog]', host)?.addEventListener('click', showCatalog);
       return;
     }
-    host.innerHTML = `<p class="section-label">O‘qiyotgan kurslarim</p>${state.myCourses.map(course => {
+    const label = todoPurchases().length ? '<p class="section-label">To‘langan kurslar</p>' : '';
+    host.innerHTML = `${label}${state.myCourses.map(course => {
       const stats = courseStats(course);
       const [label, tone] = courseState(course);
       const awaiting = course.assignment_status === 'awaiting_group';
@@ -889,7 +890,7 @@
         </section>`;
       }).join('');
     }
-    showView('courseDetailView', showMyCourses);
+    showView('courseDetailView', showProfile);
   }
 
   // ---- Profile and legal documents
@@ -1003,11 +1004,10 @@
   }
   $$('[data-back]').forEach(button => button.addEventListener('click', goBack));
   $$('[data-tab]').forEach(button => button.addEventListener('click', () => {
-    if (button.dataset.tab === 'my') showMyCourses();
-    else if (button.dataset.tab === 'profile') showProfile();
+    if (button.dataset.tab === 'profile') showProfile();
     else showCatalog();
   }));
-  $$('[data-show-my-courses]').forEach(button => button.addEventListener('click', showMyCourses));
+  $$('[data-show-profile]').forEach(button => button.addEventListener('click', showProfile));
   $$('[data-purchase-type]').forEach(button => button.addEventListener('click', () => setPurchaseType(button.dataset.purchaseType)));
   $$('[data-pay-mode]').forEach(button => button.addEventListener('click', () => {
     state.payMode = button.dataset.payMode;
@@ -1015,7 +1015,7 @@
     updateTotal();
   }));
   $('#profileButton').addEventListener('click', showProfile);
-  $('#todoBanner').addEventListener('click', showMyCourses);
+  $('#todoBanner').addEventListener('click', showProfile);
   $('#addFamilyMember').addEventListener('click', () => {
     const node = addFamilyMember();
     if (node) $('[name="full_name"]', node).focus();
