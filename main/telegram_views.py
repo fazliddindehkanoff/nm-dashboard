@@ -147,7 +147,12 @@ def process_telegram_update(update, request=None):
             account.save(update_fields=('username', 'updated_at'))
 
         text = (message.get('text') or '').strip()
-        if created and text.startswith('/start ref_'):
+        # A seller link counts until the customer registers; an existing seller is never replaced.
+        # Opening the web app first also creates the account, so creation alone is not enough.
+        can_attribute = account.referrer_id is None and (
+            created or account.onboarding_step != TelegramUser.STEP_READY
+        )
+        if can_attribute and text.startswith('/start ref_'):
             try:
                 code = uuid.UUID(text.split('ref_', 1)[1])
                 account.referrer = Operator.objects.filter(referral_code=code, user__is_active=True, role='operator').first()

@@ -135,11 +135,20 @@ class ReferralTests(TestCase):
         self.assertNotContains(response, other.referral_code.hex)
 
     @patch('main.telegram_views.send_bot_message', return_value=(True, None))
-    def test_existing_user_is_not_reassigned_to_seller(self, send):
+    def test_registered_user_is_not_reassigned_to_seller(self, send):
         op = Operator.objects.create(user=User.objects.create_user('seller'), full_name='Seller')
-        TelegramUser.objects.create(telegram_id=44)
+        TelegramUser.objects.create(telegram_id=44, phone_number='+998901112244', onboarding_step=TelegramUser.STEP_READY)
         process_telegram_update({'message': {'from': {'id': 44}, 'text': f'/start ref_{op.referral_code.hex}'}})
         self.assertIsNone(TelegramUser.objects.get(telegram_id=44).referrer_id)
+
+    @patch('main.telegram_views.send_bot_message', return_value=(True, None))
+    def test_seller_link_counts_after_the_web_app_was_opened_first(self, send):
+        op = Operator.objects.create(user=User.objects.create_user('seller'), full_name='Seller')
+        # Opening the web app before the bot creates an unregistered account.
+        TelegramUser.objects.create(telegram_id=45, full_name='Aziza Karimova')
+        process_telegram_update({'message': {'from': {'id': 45}, 'text': f'/start ref_{op.referral_code.hex}'}})
+        account = TelegramUser.objects.get(telegram_id=45)
+        self.assertEqual((account.referrer, account.onboarding_step), (op, TelegramUser.STEP_NAME))
 
 
 @override_settings(DEBUG=False, SECURE_SSL_REDIRECT=False, MULTICARD=multicard_fixture.CONFIG, TELEGRAM={'BOT_TOKEN': multicard_fixture.BOT_TOKEN})
