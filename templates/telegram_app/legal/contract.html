@@ -2,8 +2,8 @@
   <div class="legal-document__purchase">
     <p><span>Shartnoma</span><strong>№ {{ purchase.uuid }}</strong></p>
     <p><span>Sana</span><strong>{{ contract_date|date:"d.m.Y" }}</strong></p>
-    <p><span>Buyurtmachi</span><strong>{{ purchase.telegram_user.full_name }}</strong></p>
-    <p><span>Telefon</span><strong>{{ purchase.telegram_user.phone_number }}</strong></p>
+    <p><span>Buyurtmachi</span><strong>{{ purchase.buyer_name }}</strong></p>
+    <p><span>Telefon</span><strong>{{ purchase.buyer_phone }}</strong></p>
     <p><span>Kurs</span><strong>{{ purchase.course.name }}</strong></p>
     {% if purchase.group %}<p><span>Guruh boshlanishi</span><strong>{{ purchase.group.start_date|date:"d.m.Y" }}</strong></p>{% endif %}
     <p><span>Ishtirokchilar</span><strong>{{ purchase.participant_count }} kishi</strong></p>

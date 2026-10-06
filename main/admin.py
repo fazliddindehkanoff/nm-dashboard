@@ -40,7 +40,7 @@ from .models import (
     TelegramCampaign, TelegramCampaignRecipient, TelegramChannelMember, TelegramUser,
     _recalc_transaction_participants, sub_transaction_shares,
 )
-from .permissions import is_operator
+from .permissions import can_create_payment_links, is_operator
 from .services.amocrm import (
     sync_contacts,
     link_client_to_amocrm,
@@ -53,7 +53,8 @@ from .services.telegram import send_payment_qr, TelegramNotConfigured
 from .services.telegram_campaigns import queue_campaign
 from .services.telegram_channels import ChannelSetupError, check_channel, refresh_group, removal_deadline, resend_link
 from .services.legal import contract_version, TERMS_VERSION
-from .services.mini_app import sync_group_payment
+from .services.mini_app import can_cancel, cancel_purchase, sync_group_payment
+from .services import payment_links
 from .templatetags.money import money
 
 
@@ -711,8 +712,76 @@ class ClientAdmin(ModelAdmin):
                 self.admin_site.admin_view(self.add_client_quick),
                 name="%s_%s_add_quick" % info,
             ),
+            path(
+                "<path:object_id>/payment-link/",
+                self.admin_site.admin_view(self.payment_link_view),
+                name="%s_%s_payment_link" % info,
+            ),
         ]
         return custom + urls
+
+    # ---- To'lov havolasi: mijoz brauzerda ochib to'laydi ----
+    def payment_link_view(self, request, object_id):
+        if not can_create_payment_links(request.user) or not self.has_view_permission(request):
+            raise PermissionDenied
+        client = self.get_object(request, object_id)
+        if client is None:
+            self.message_user(request, _("Mijoz topilmadi."), level=messages.ERROR)
+            return redirect("admin:main_client_changelist")
+        page = reverse("admin:main_client_payment_link", args=[client.pk])
+        if request.method == 'POST':
+            action = request.POST.get('action')
+            try:
+                if action == 'course':
+                    group = Group.objects.upcoming().select_related('course').get(pk=request.POST.get('group'))
+                    purchase = payment_links.create_course_link(
+                        client, group, request.POST.get('payment_mode', 'full'), request.user,
+                    )
+                elif action == 'debt':
+                    purchase = payment_links.create_debt_link(
+                        client, int(request.POST.get('participation') or 0), request.POST.get('amount'), request.user,
+                    )
+                elif action == 'cancel':
+                    purchase = self._client_links(client).get(pk=request.POST.get('purchase'))
+                    cancel_purchase(purchase)
+                    self.message_user(request, _("Havola bekor qilindi."), messages.SUCCESS)
+                    return redirect(page)
+                else:
+                    raise ValueError(_("Amalni tanlang."))
+            except (Group.DoesNotExist, MiniAppPurchase.DoesNotExist):
+                self.message_user(request, _("Guruh yoki havola topilmadi."), messages.ERROR)
+                return redirect(page)
+            except ValueError as exc:
+                self.message_user(request, str(exc), messages.ERROR)
+                return redirect(page)
+            self.message_user(request, _("To'lov havolasi tayyor. Uni mijozga yuboring."), messages.SUCCESS)
+            return redirect(f"{page}?created={purchase.pk}")
+
+        groups = Group.objects.upcoming().select_related('course').prefetch_related('teachers').order_by('start_date', 'id')
+        links = list(self._client_links(client).prefetch_related('multicard_invoices', 'members')[:20])
+        for link in links:
+            link.url = request.build_absolute_uri(reverse('main:payment_link', args=[link.link_token]))
+            link.cancellable = can_cancel(link)
+        created = next((link for link in links if str(link.pk) == request.GET.get('created')), None)
+        context = {
+            **self.admin_site.each_context(request),
+            "title": _("To'lov havolasi"),
+            "client": client,
+            "groups": groups,
+            "debts": payment_links.open_debts(client),
+            "links": links,
+            "created": created,
+            "detail_url": reverse("admin:main_client_detail", args=[client.pk]),
+            "phone_ok": bool(re.fullmatch(r'\+?998\d{9}|\d{9}', re.sub(r'[\s()-]', '', client.phone_number or ''))),
+        }
+        return TemplateResponse(request, "admin/main/client/payment_link.html", context)
+
+    @staticmethod
+    def _client_links(client):
+        return (
+            MiniAppPurchase.objects.filter(link_token__isnull=False, members__client=client)
+            .select_related('course', 'group', 'created_by').distinct().order_by('-created_at', '-id')
+        )
 
     def client_detail_view(self, request, object_id):
         if not self.has_view_permission(request):
@@ -763,6 +832,8 @@ class ClientAdmin(ModelAdmin):
             "changelist_url": reverse("admin:main_client_changelist"),
             "has_change_permission": self.has_change_permission(request, client),
             "has_delete_permission": self.has_delete_permission(request, client),
+            "payment_link_url": reverse("admin:main_client_payment_link", args=[client.pk])
+            if can_create_payment_links(request.user) else '',
         }
         return TemplateResponse(request, "admin/main/client/detail.html", context)
 
@@ -2731,7 +2802,7 @@ class MiniAppPurchaseAdmin(ModelAdmin):
         'telegram_user__full_name', 'telegram_user__phone_number',
         'members__full_name', 'members__phone_number', 'payment_reference',
     )
-    readonly_fields = ('referrer', 'social_discount_amount', 'uuid', 'discount_name', 'discount_per_person', 'created_at', 'updated_at', 'paid_at', 'booking_discount',
+    readonly_fields = ('referrer', 'created_by', 'crm_transaction', 'social_discount_amount', 'uuid', 'discount_name', 'discount_per_person', 'created_at', 'updated_at', 'paid_at', 'booking_discount',
                        'discount_amount', 'sale_amount_display', 'paid_amount', 'balance', 'group_payment_link')
     autocomplete_fields = ('telegram_user', 'course')
     inlines = (MiniAppPurchaseMemberInline, MulticardInvoiceInline,)
@@ -2739,8 +2810,11 @@ class MiniAppPurchaseAdmin(ModelAdmin):
     def get_queryset(self, request):
         queryset = super().get_queryset(request).select_related(
             'telegram_user', 'course', 'group__course', 'group_payment',
-        )
-        return queryset.filter(referrer=request.user.operator) if _is_plain_operator(request) else queryset
+        ).prefetch_related('members')
+        if _is_plain_operator(request):
+            # Sellers see their referral sales and the payment links they made.
+            queryset = queryset.filter(models.Q(referrer=request.user.operator) | models.Q(created_by=request.user))
+        return queryset
 
     def get_readonly_fields(self, request, obj=None):
         fields = super().get_readonly_fields(request, obj)
@@ -2755,7 +2829,7 @@ class MiniAppPurchaseAdmin(ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
-        if obj.group_id and obj.paid_amount > 0:
+        if obj.group_id and obj.paid_amount > 0 and not obj.crm_transaction_id:
             with db_transaction.atomic():
                 if sync_group_payment(obj):
                     self.message_user(
@@ -2794,9 +2868,10 @@ class MiniAppPurchaseAdmin(ModelAdmin):
 
     @display(description=_("Xaridor"), ordering='telegram_user__full_name')
     def buyer_display(self, obj):
+        source = _("to'lov havolasi") if obj.created_by_id else ''
         return format_html(
-            '{}<div class="text-xs text-base-500 mt-0.5">{}</div>',
-            obj.telegram_user.full_name or obj.telegram_user.username or '—', obj.telegram_user.phone_number or '',
+            '{}<div class="text-xs text-base-500 mt-0.5">{}{}</div>',
+            obj.buyer_name or '—', obj.buyer_phone or '', f" · {source}" if source else '',
         )
 
     @display(description=_("Kurs va guruh"), ordering='course__name')
@@ -2809,7 +2884,7 @@ class MiniAppPurchaseAdmin(ModelAdmin):
         label={
             _("To'langan"): "success", _("Bron qilingan — qisman to'langan"): "info",
             _("To'lov kutilmoqda"): "warning", _("To'lov amalga oshmadi"): "danger",
-            _("To'lov qaytarilgan"): "danger", _("Savatga qaytarilgan"): "default",
+            _("To'lov qaytarilgan"): "danger", _("Bekor qilingan"): "default",
         },
     )
     def payment_status_badge(self, obj):

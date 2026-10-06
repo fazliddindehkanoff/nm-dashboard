@@ -307,6 +307,8 @@ def sync_group_payment(purchase):
     group's payments, attendance and debt match the purchase.
     """
     purchase = MiniAppPurchase.objects.select_related('group__course').get(pk=purchase.pk)
+    if purchase.crm_transaction_id:
+        return None  # A debt link is recorded on its CRM payment, not as a new course sale.
     payment = Transaction.objects.filter(mini_app_purchase=purchase).first()
     if not purchase.group_id or (payment is None and purchase.paid_amount <= 0):
         return payment

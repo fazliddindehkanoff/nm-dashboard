@@ -28,6 +28,12 @@ def is_accountant(user):
     return has_role(user, RoleConfiguration.ROLE_ACCOUNTANT)
 
 
+def can_create_payment_links(user):
+    return has_role(
+        user, RoleConfiguration.ROLE_ADMIN, RoleConfiguration.ROLE_OWNER, RoleConfiguration.ROLE_OPERATOR,
+    )
+
+
 def _has_permission(request, permission):
     return request.user.is_active and request.user.has_perm(permission)
 

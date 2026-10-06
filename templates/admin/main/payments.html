@@ -61,9 +61,9 @@
         <div class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800">
             <span class="pay-icon" style="background: #e0f7f9; color: #0b6f7c;"><span class="material-symbols-outlined" aria-hidden="true">smartphone</span></span>
             <div class="min-w-0">
-                <p class="text-sm text-base-500 mb-0">Web app (Rahmat)</p>
+                <p class="text-sm text-base-500 mb-0">Onlayn (Rahmat)</p>
                 <div class="font-semibold text-xl text-font-important-light dark:text-font-important-dark whitespace-nowrap">{{ web_app_total|money }} <span class="text-xs font-normal text-base-500">UZS</span></div>
-                <p class="text-xs text-base-500 mb-0">tasdiqlangan onlayn to‘lovlar</p>
+                <p class="text-xs text-base-500 mb-0">web app va to‘lov havolalari</p>
             </div>
         </div>
         <a href="?{{ tab_query }}{% if tab_query %}&amp;{% endif %}status=refunded" class="bg-white flex items-center gap-4 p-5 rounded-default shadow-xs border border-base-200 dark:bg-base-900 dark:border-base-800 hover:border-base-400 transition-colors">
@@ -137,7 +137,7 @@
                         <td class="py-3 px-5 whitespace-nowrap">{{ row.method }}</td>
                         <td class="py-3 px-5"><span class="pay-status pay-status--{{ row.status }}">{{ row.status_label }}</span></td>
                         <td class="py-3 px-5 whitespace-nowrap">
-                            <span class="pay-source {% if row.source == 'Web App' %}pay-source--web{% elif row.source == 'CRM' %}pay-source--crm{% else %}pay-source--sub{% endif %}">{{ row.source }}</span>
+                            <span class="pay-source {% if row.source == 'Web App' or row.source == 'To‘lov havolasi' %}pay-source--web{% elif row.source == 'CRM' %}pay-source--crm{% else %}pay-source--sub{% endif %}">{{ row.source }}</span>
                             <span class="text-xs text-base-500 ml-1">{{ row.reference }}</span>
                         </td>
                     </tr>

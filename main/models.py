@@ -782,6 +782,15 @@ class SubTransaction(models.Model):
         verbose_name=_("Ko'rib chiqdi"),
     )
     review_note = models.CharField(_("Izoh"), max_length=255, blank=True, default='')
+    multicard_invoice = models.OneToOneField(
+        'MulticardInvoice',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='crm_installment',
+        editable=False,
+        verbose_name=_("To'lov havolasi orqali to'lov"),
+    )
 
     class Meta:
         verbose_name = _("Ichki to'lov")
@@ -1105,15 +1114,39 @@ class MiniAppPurchase(models.Model):
         (PAYMENT_SUCCESS, _("To'langan")),
         (PAYMENT_FAILED, _("To'lov amalga oshmadi")),
         (PAYMENT_REFUNDED, _("To'lov qaytarilgan")),
-        (PAYMENT_CANCELLED, _("Savatga qaytarilgan")),
+        (PAYMENT_CANCELLED, _("Bekor qilingan")),
     )
 
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    # Empty for payment links that staff create for a client without Telegram.
     telegram_user = models.ForeignKey(
         TelegramUser,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name='purchases',
         verbose_name=_("Telegram foydalanuvchi"),
+    )
+    # A payment link opens the purchase in any browser; only shared purchases have one.
+    link_token = models.UUIDField(_("To'lov havolasi kaliti"), null=True, blank=True, unique=True, editable=False)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_payment_links',
+        editable=False,
+        verbose_name=_("Havolani yaratdi"),
+    )
+    # A debt link pays the balance of this CRM payment instead of buying the course again.
+    crm_transaction = models.ForeignKey(
+        'Transaction',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='payment_links',
+        editable=False,
+        verbose_name=_("Qarzi to'lanadigan CRM to'lovi"),
     )
     course = models.ForeignKey(
         Course,
@@ -1165,7 +1198,25 @@ class MiniAppPurchase(models.Model):
         ordering = ('-created_at', '-id')
 
     def __str__(self):
-        return f"{self.telegram_user} - {self.course} - {self.total_amount}"
+        return f"{self.buyer_name or '—'} - {self.course} - {self.total_amount}"
+
+    def _buyer_member(self):
+        return next((member for member in self.members.all()
+                     if member.relationship == MiniAppPurchaseMember.RELATION_SELF), None)
+
+    @property
+    def buyer_name(self):
+        if self.telegram_user_id:
+            return self.telegram_user.full_name or self.telegram_user.username
+        member = self._buyer_member()
+        return member.full_name if member else ''
+
+    @property
+    def buyer_phone(self):
+        if self.telegram_user_id:
+            return self.telegram_user.phone_number
+        member = self._buyer_member()
+        return member.phone_number if member else ''
 
     def mark_paid(self, reference=''):
         self.discount_amount = self.booking_discount if self.is_booking else Decimal(0)
@@ -1350,9 +1401,12 @@ class LegalAcceptance(models.Model):
         (DOCUMENT_CONTRACT, _("Sog'lomlashtirish xizmatlari shartnomasi")),
     )
 
+    # Empty when a client accepts the contract on a browser payment link.
     telegram_user = models.ForeignKey(
         TelegramUser,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name='legal_acceptances',
         verbose_name=_("Telegram foydalanuvchi"),
     )

@@ -1,5 +1,6 @@
 from django.urls import path
 from .feature_views import group_banner, payments, referrals, upload_eligibility_document, eligibility_document
+from .payment_link_views import payment_link
 from .views import cashflow, salaries, qr_verify
 from .telegram_views import (
     telegram_app,
@@ -29,6 +30,7 @@ app_name = 'main'
 
 urlpatterns = [
     path('media/group_banners/<path:banner_path>', group_banner, name='group_banner'),
+    path('pay/<uuid:token>/', payment_link, name='payment_link'),
     path('payments/', payments, name='payments'),
     path('referrals/', referrals, name='referrals'),
     path('telegram-app/api/eligibility-documents/', upload_eligibility_document, name='upload_eligibility_document'),

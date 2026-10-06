@@ -19,17 +19,25 @@ from django.utils import timezone
 from main.models import Client, MiniAppPurchase, MiniAppPurchaseMember, MulticardInvoice
 from .booking import check_payment_version, payment_amount
 from .mini_app import sync_group_payment
+from .payment_links import client_chat_id, record_crm_installment, reverse_crm_installment
 
 
 logger = logging.getLogger(__name__)
 
 
-def _sync_group_payment(purchase):
-    # Settling real money must never fail because the CRM mirror could not be
+def _sync_group_payment(purchase, invoice=None, refunded=False):
+    # Settling real money must never fail because the CRM record could not be
     # written; staff can re-save the purchase in the admin to retry.
     try:
         with transaction.atomic():
-            sync_group_payment(purchase)
+            if purchase.crm_transaction_id:
+                # A debt link pays an existing CRM payment instead of adding a course sale.
+                if refunded:
+                    reverse_crm_installment(invoice)
+                else:
+                    record_crm_installment(purchase, invoice)
+            else:
+                sync_group_payment(purchase)
     except Exception:
         logger.exception('Group payment sync failed for purchase %s', purchase.pk)
 
@@ -118,7 +126,7 @@ class MulticardClient:
             raise MulticardError('Multicard so‘rovni bajara olmadi. Holatni tekshiring.')
         return body['data']
 
-    def create_invoice(self, invoice, purchase):
+    def create_invoice(self, invoice, purchase, return_url=None):
         item = {
             'qty': purchase.participant_count, 'price': to_tiyin(purchase.unit_price),
             'total': invoice.amount, 'name': purchase.course.name,
@@ -133,7 +141,8 @@ class MulticardClient:
         return self._request('POST', '/payment/invoice', {
             'store_id': invoice.store_id, 'amount': invoice.amount,
             'invoice_id': str(invoice.invoice_id), 'lang': 'uz',
-            'return_url': self.config['RETURN_URL'], 'return_error_url': self.config['RETURN_URL'],
+            'return_url': return_url or self.config['RETURN_URL'],
+            'return_error_url': return_url or self.config['RETURN_URL'],
             'callback_url': self.config['CALLBACK_URL'], 'ofd': [item],
         })
 
@@ -141,7 +150,7 @@ class MulticardClient:
         return self._request('GET', f'/payment/invoice/{UUID(str(provider_uuid))}')
 
 
-def get_or_create_invoice(purchase, requested_amount=None, expected_paid=None):
+def get_or_create_invoice(purchase, requested_amount=None, expected_paid=None, return_url=None):
     config = configuration()
     with transaction.atomic():
         purchase = MiniAppPurchase.objects.select_for_update().get(pk=purchase.pk)
@@ -170,7 +179,9 @@ def get_or_create_invoice(purchase, requested_amount=None, expected_paid=None):
                 return invoice
             raise MulticardError("To'lov holati tekshirilmoqda. Qayta to'lamang; administrator bilan bog'laning.")
     try:
-        data = MulticardClient(config).create_invoice(invoice, purchase)
+        client = MulticardClient(config)
+        data = (client.create_invoice(invoice, purchase, return_url=return_url) if return_url
+                else client.create_invoice(invoice, purchase))
         provider_uuid = UUID(data.get('uuid', ''))
         if (str(data.get('invoice_id')) != str(invoice.invoice_id)
                 or type(data.get('amount')) is not int or data['amount'] != amount
@@ -194,17 +205,20 @@ def get_or_create_invoice(purchase, requested_amount=None, expected_paid=None):
 def _link_members(purchase):
     account = purchase.telegram_user
     for member in purchase.members.all():
-        # Keep the existing CRM phone normalization behavior.
-        target = ''.join(filter(str.isdigit, member.phone_number))
-        client = next((item for item in Client.objects.only('id', 'phone_number')
-                       if ''.join(filter(str.isdigit, item.phone_number)) == target), None)
+        client = member.client  # Payment links are made for a chosen CRM client.
+        if client is None:
+            # Keep the existing CRM phone normalization behavior.
+            target = ''.join(filter(str.isdigit, member.phone_number))
+            client = next((item for item in Client.objects.only('id', 'phone_number')
+                           if ''.join(filter(str.isdigit, item.phone_number)) == target), None)
         if not client:
             client = Client.objects.create(full_name=member.full_name, phone_number=member.phone_number)
         if purchase.referrer_id:
             Client.objects.filter(pk=client.pk, operator__isnull=True).update(operator_id=purchase.referrer_id)
-        member.client = client
-        member.save(update_fields=('client',))
-        if member.relationship == MiniAppPurchaseMember.RELATION_SELF:
+        if member.client_id != client.pk:
+            member.client = client
+            member.save(update_fields=('client',))
+        if account and member.relationship == MiniAppPurchaseMember.RELATION_SELF:
             account.client = client
             account.save(update_fields=('client', 'updated_at'))
 
@@ -245,8 +259,10 @@ def _settle(invoice, payment_uuid, receipt_url='', provider='multicard'):
     if provider != 'demo':
         from main.models import PaymentQRDelivery
         for member in purchase.members.all():
-            PaymentQRDelivery.objects.get_or_create(invoice=invoice, member=member)
-    _sync_group_payment(purchase)
+            # A client who never used the bot cannot receive the QR code there.
+            if purchase.telegram_user_id or client_chat_id(member.client_id):
+                PaymentQRDelivery.objects.get_or_create(invoice=invoice, member=member)
+    _sync_group_payment(purchase, invoice)
 
 
 def accept_success_callback(data):
@@ -323,7 +339,7 @@ def reconcile_invoice(invoice):
                 paid_amount=paid, discount_amount=discount,
                 payment_status=purchase_status, updated_at=timezone.now(),
             )
-            _sync_group_payment(purchase)
+            _sync_group_payment(purchase, invoice, refunded=True)
         elif status == 'error' and invoice.state not in ('success', 'revert'):
             invoice.state = 'error'
             invoice.save(update_fields=('state', 'updated_at'))

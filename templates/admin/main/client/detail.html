@@ -23,6 +23,13 @@
         </div>
 
         <div class="flex items-center gap-3">
+            {% if payment_link_url %}
+            <a href="{{ payment_link_url }}"
+               class="flex items-center gap-2 font-medium px-4 py-2 rounded-default text-sm transition-colors" style="background: #0a7381; color: #fff;">
+                <span class="material-symbols-outlined text-[18px]" aria-hidden="true">add_link</span>
+                {% trans "To'lov havolasi" %}
+            </a>
+            {% endif %}
             {% if has_change_permission %}
             <a href="{{ change_url }}"
                class="flex items-center gap-2 bg-base-900 text-white dark:bg-base-100 dark:text-base-900 font-medium px-4 py-2 rounded-default text-sm hover:bg-base-700 dark:hover:bg-base-200 transition-colors">

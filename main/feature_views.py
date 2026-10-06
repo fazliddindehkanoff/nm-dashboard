@@ -12,7 +12,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import PermissionDenied
 from django.core.files.storage import FileSystemStorage, default_storage
 from django.core.paginator import Paginator
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
@@ -133,13 +133,21 @@ def payments(request):
     manual = Transaction.objects.filter(mini_app_purchase__isnull=True).select_related(
         'group__course', 'operator',
     ).prefetch_related('clients', 'sub_transactions')
-    subs = SubTransaction.objects.select_related('transaction__group__course', 'transaction__operator').prefetch_related('clients')
-    online = MulticardInvoice.objects.select_related('purchase__course', 'purchase__telegram_user', 'purchase__referrer').exclude(store_id='demo').annotate(effective_at=Coalesce('paid_at', 'created_at'))
+    # A debt link payment is listed once, from its invoice.
+    subs = SubTransaction.objects.filter(multicard_invoice__isnull=True).select_related(
+        'transaction__group__course', 'transaction__operator',
+    ).prefetch_related('clients')
+    online = MulticardInvoice.objects.select_related(
+        'purchase__course', 'purchase__telegram_user', 'purchase__referrer',
+    ).prefetch_related('purchase__members').exclude(store_id='demo').annotate(effective_at=Coalesce('paid_at', 'created_at'))
     if is_operator(request.user):
         operator = request.user.operator
         manual = manual.filter(operator=operator)
         subs = subs.filter(transaction__operator=operator)
-        online = online.filter(purchase__referrer=operator)
+        online = online.filter(
+            Q(purchase__referrer=operator) | Q(purchase__crm_transaction__operator=operator)
+            | Q(purchase__created_by=request.user)
+        )
     if start:
         manual, subs, online = manual.filter(date__gte=start), subs.filter(received_at__date__gte=start), online.filter(effective_at__date__gte=start)
     if end:
@@ -162,9 +170,9 @@ def payments(request):
             source='Qo‘shimcha to‘lov', reference=f'S-{item.pk}', link=reverse('admin:main_subtransaction_change', args=[item.pk])))
     for item in online:
         rows.append(dict(date=timezone.localdate(item.paid_at or item.created_at), sort=item.paid_at or item.created_at,
-            name=item.purchase.telegram_user.full_name, course=item.purchase.course.name, amount=Decimal(item.amount)/100,
+            name=item.purchase.buyer_name, course=item.purchase.course.name, amount=Decimal(item.amount)/100,
             method='Rahmat', status={'success':'success', 'revert':'refunded', 'error':'failed'}.get(item.state,'pending'),
-            source='Web App', reference=f'R-{item.pk}', link=reverse('admin:main_miniapppurchase_change', args=[item.purchase_id]) if request.user.has_perm('main.view_miniapppurchase') else ''))
+            source='To‘lov havolasi' if item.purchase.created_by_id else 'Web App', reference=f'R-{item.pk}', link=reverse('admin:main_miniapppurchase_change', args=[item.purchase_id]) if request.user.has_perm('main.view_miniapppurchase') else ''))
     labels = {'pending': 'Kutilmoqda', 'success': 'Tasdiqlangan', 'failed': 'Rad etilgan / xato', 'refunded': 'Qaytarilgan'}
     rows = [row for row in rows if not search or search in f"{row['name']} {row['course']} {row['reference']}".casefold()]
     # Tab counts and sums follow every filter except the status tab itself.
@@ -172,7 +180,7 @@ def payments(request):
     for row in rows:
         summary[row['status']]['count'] += 1
         summary[row['status']]['amount'] += row['amount']
-    web_app_total = sum((row['amount'] for row in rows if row['status'] == 'success' and row['source'] == 'Web App'), Decimal(0))
+    web_app_total = sum((row['amount'] for row in rows if row['status'] == 'success' and row['source'] in ('Web App', 'To‘lov havolasi')), Decimal(0))
     rows = [row for row in rows if not status or row['status'] == status]
     rows.sort(key=lambda row: row['sort'], reverse=True)
     total = sum((row['amount'] for row in rows if row['status'] == 'success'), Decimal(0))

@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.db.models import F
 from django.utils import timezone
 from main.models import PaymentQRDelivery
+from .payment_links import client_chat_id
 from .telegram import generate_qr_png, send_bot_photo
 
 
@@ -28,7 +29,8 @@ def process_payment_notifications(limit=8):
                    'Darsga kelganda ushbu QR-kodni ko‘rsating.')
         try:
             with generate_qr_png(str(member.client.uuid)) as photo:
-                ok, error = send_bot_photo(purchase.telegram_user.telegram_id, photo, caption=caption[:1024])
+                chat_id = purchase.telegram_user.telegram_id if purchase.telegram_user_id else client_chat_id(member.client_id)
+                ok, error = send_bot_photo(chat_id, photo, caption=caption[:1024]) if chat_id else (False, 'Telegram akkaunti yo‘q')
         except Exception:
             ok, error = False, 'Telegram delivery failed'
         PaymentQRDelivery.objects.filter(pk=delivery.pk).update(

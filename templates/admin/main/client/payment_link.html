@@ -1,0 +1,173 @@
+{% extends 'unfold/layouts/base.html' %}
+{% load money i18n %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block content %}
+<style>
+    .pl-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; }
+    .dark .pl-card { background: rgb(17 24 39); border-color: rgb(31 41 55); }
+    .pl-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .pl-input { width: 100%; height: 40px; border: 1px solid #d1d5db; border-radius: 8px; padding: 0 10px; font-size: 14px; background: #fff; color: inherit; }
+    .dark .pl-input { background: rgb(31 41 55); border-color: rgb(55 65 81); }
+    .pl-button { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 16px; border-radius: 8px; font-size: 14px; font-weight: 600; background: #0a7381; color: #fff; border: 0; cursor: pointer; }
+    .pl-button--quiet { background: transparent; color: #0a7381; border: 1px solid #b6d9de; }
+    .pl-button--danger { background: transparent; color: #b4233f; border: 1px solid #f2c4cd; height: 32px; padding: 0 10px; font-size: 13px; }
+    .pl-choice { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+    .pl-choice label { display: inline-flex; align-items: center; gap: 6px; }
+    .pl-created { border-left: 4px solid #0a7381; }
+    .pl-link { flex: 1; min-width: 0; height: 40px; border: 1px solid #d1d5db; border-radius: 8px; padding: 0 10px; font-size: 13px; background: #f9fafb; color: inherit; }
+    .dark .pl-link { background: rgb(31 41 55); border-color: rgb(55 65 81); }
+    .pl-badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+</style>
+
+<div class="px-4 lg:px-12 pb-12 pt-8 flex flex-col gap-6" style="max-width: 1100px;">
+    {% if messages %}{% include "unfold/helpers/messages.html" %}{% endif %}
+
+    <div class="flex flex-col gap-1">
+        <a href="{{ detail_url }}" class="text-sm text-base-500 hover:text-base-700 flex items-center gap-1">
+            <span class="material-symbols-outlined text-[18px]" aria-hidden="true">arrow_back</span>{{ client.full_name }}
+        </a>
+        <h1 class="font-semibold text-2xl text-font-important-light dark:text-font-important-dark">{% trans "To'lov havolasi" %}</h1>
+        <p class="text-sm text-base-500 mb-0">{% trans "Mijoz havolani istalgan telefonda brauzerda ochadi, shartnomani tasdiqlaydi va Multicard orqali to'laydi. To'lov guruh va qarzga avtomatik yoziladi." %}</p>
+    </div>
+
+    {% if created %}
+    <section class="pl-card pl-created" aria-labelledby="createdTitle">
+        <h2 id="createdTitle" class="font-semibold text-base mb-1">{% trans "Havola tayyor" %}</h2>
+        <p class="text-sm text-base-500 mb-3">{{ created.course.name }} · {{ created.total_amount|money }} so‘m{% if created.crm_transaction_id %} · {% trans "qarz to'lovi" %}{% endif %}</p>
+        <div class="flex items-center gap-2 flex-wrap">
+            <input class="pl-link" readonly value="{{ created.url }}" aria-label="{% trans "To'lov havolasi" %}" onclick="this.select()">
+            <button type="button" class="pl-button" data-copy="{{ created.url }}"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">content_copy</span><span data-copy-label>{% trans "Nusxalash" %}</span></button>
+            <a class="pl-button pl-button--quiet" href="https://t.me/share/url?url={{ created.url|urlencode }}&text={{ created.course.name|urlencode }}%20%E2%80%94%20to%E2%80%98lov%20havolasi" target="_blank" rel="noopener"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">send</span>{% trans "Telegramda yuborish" %}</a>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if not phone_ok %}
+    <p class="pl-card text-sm" style="border-left: 4px solid #d97706;">{% blocktrans with phone=client.phone_number %}Mijozning telefon raqami ({{ phone }}) noto'g'ri ko'rinishda. Yangi kurs uchun havola yaratishdan oldin uni +998 XX XXX XX XX ko'rinishida tuzating.{% endblocktrans %}</p>
+    {% endif %}
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section class="pl-card" aria-labelledby="courseTitle">
+            <h2 id="courseTitle" class="font-semibold text-base mb-1">{% trans "Yangi kurs uchun" %}</h2>
+            <p class="text-sm text-base-500 mb-4">{% trans "Narx va chegirmalar web app'dagi kabi hisoblanadi." %}</p>
+            {% if groups %}
+            <form method="post" class="flex flex-col gap-4">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="course">
+                <div>
+                    <label class="pl-label" for="group">{% trans "Guruh" %}</label>
+                    <select class="pl-input" id="group" name="group" required>
+                        {% for group in groups %}
+                        <option value="{{ group.pk }}">{{ group.start_date|date:"d.m.Y" }} · {{ group.course.name }}{% for teacher in group.teachers.all %}{% if forloop.first %} · {% endif %}{{ teacher.full_name }}{% if not forloop.last %}, {% endif %}{% endfor %} · {{ group.course.price|money }} so‘m</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <fieldset>
+                    <legend class="pl-label">{% trans "To'lov turi" %}</legend>
+                    <div class="pl-choice">
+                        <label><input type="radio" name="payment_mode" value="full" checked> {% trans "To'liq to'lov" %}</label>
+                        <label><input type="radio" name="payment_mode" value="booking"> {% trans "Bron (qismlab to'lash)" %}</label>
+                    </div>
+                </fieldset>
+                <div><button type="submit" class="pl-button"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">add_link</span>{% trans "Havola yaratish" %}</button></div>
+            </form>
+            {% else %}
+            <p class="text-sm text-base-500">{% trans "Hozir qabul ochiq guruh yo'q." %}</p>
+            {% endif %}
+        </section>
+
+        <section class="pl-card" aria-labelledby="debtTitle">
+            <h2 id="debtTitle" class="font-semibold text-base mb-1">{% trans "Qarzni to'lash uchun" %}</h2>
+            <p class="text-sm text-base-500 mb-4">{% trans "To'lov o'sha guruhdagi to'lovga qo'shiladi va qarz kamayadi." %}</p>
+            {% for debt in debts %}
+            <form method="post" class="flex flex-col gap-3 {% if not forloop.last %}mb-5 pb-5 border-b border-base-200{% endif %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="debt">
+                <input type="hidden" name="participation" value="{{ debt.pk }}">
+                <div class="text-sm"><strong>{{ debt.transaction.group.course.name }}</strong> · {{ debt.transaction.group.start_date|date:"d.m.Y" }}<br><span class="text-base-500">{% trans "Qarz" %}: {{ debt.debt|money }} so‘m{% if debt.transaction.mini_app_purchase_id %} · {% trans "web app xaridi" %}{% endif %}</span></div>
+                {% if debt.transaction.mini_app_purchase_id %}
+                <p class="text-xs text-base-500 mb-0">{% trans "Web app xaridining qolgan qismi shu xarid havolasi orqali to'lanadi; mijoz summani o'zi tanlaydi." %}</p>
+                {% else %}
+                <div>
+                    <label class="pl-label" for="amount-{{ debt.pk }}">{% trans "Summa (so'm)" %}</label>
+                    <input class="pl-input" id="amount-{{ debt.pk }}" name="amount" type="number" min="1" step="0.01" max="{{ debt.debt|plain_amount }}" value="{{ debt.debt|plain_amount }}" required>
+                </div>
+                {% endif %}
+                <div><button type="submit" class="pl-button"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">add_link</span>{% trans "Havola yaratish" %}</button></div>
+            </form>
+            {% empty %}
+            <p class="text-sm text-base-500">{% trans "Mijozning qarzi yo'q." %}</p>
+            {% endfor %}
+        </section>
+    </div>
+
+    <section class="pl-card" aria-labelledby="linksTitle">
+        <h2 id="linksTitle" class="font-semibold text-base mb-3">{% trans "Yaratilgan havolalar" %}</h2>
+        {% if links %}
+        <div style="overflow-x: auto;">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-xs uppercase text-base-500 border-b border-base-200">
+                        <th class="py-2 pr-4 font-medium">{% trans "Kurs" %}</th>
+                        <th class="py-2 pr-4 font-medium">{% trans "Turi" %}</th>
+                        <th class="py-2 pr-4 font-medium" style="text-align: right;">{% trans "Summa" %}</th>
+                        <th class="py-2 pr-4 font-medium">{% trans "Holat" %}</th>
+                        <th class="py-2 pr-4 font-medium" style="min-width: 260px;">{% trans "Havola" %}</th>
+                        <th class="py-2 font-medium">{% trans "Yaratdi" %}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for link in links %}
+                    <tr class="border-b border-base-200 last:border-0">
+                        <td class="py-3 pr-4">{{ link.course.name }}{% if link.group %}<div class="text-xs text-base-500">{{ link.group.start_date|date:"d.m.Y" }}</div>{% endif %}</td>
+                        <td class="py-3 pr-4 whitespace-nowrap">{% if link.crm_transaction_id %}{% trans "Qarz" %}{% elif link.created_by_id %}{% trans "Yangi kurs" %}{% else %}{% trans "Web app xaridi" %}{% endif %}</td>
+                        <td class="py-3 pr-4 whitespace-nowrap" style="text-align: right;">{{ link.sale_amount|money }}{% if link.paid_amount %}<div class="text-xs text-base-500">{% trans "to'langan" %} {{ link.paid_amount|money }}</div>{% endif %}</td>
+                        <td class="py-3 pr-4">
+                            {% if link.payment_status == 'success' %}<span class="pl-badge" style="background: #dcfce7; color: #166534;">{{ link.get_payment_status_display }}</span>
+                            {% elif link.payment_status == 'partial' %}<span class="pl-badge" style="background: #e0f2fe; color: #075985;">{{ link.get_payment_status_display }}</span>
+                            {% elif link.payment_status == 'cancelled' or link.payment_status == 'refunded' %}<span class="pl-badge" style="background: #f3f4f6; color: #4b5563;">{{ link.get_payment_status_display }}</span>
+                            {% else %}<span class="pl-badge" style="background: #fef3c7; color: #92400e;">{{ link.get_payment_status_display }}</span>{% endif %}
+                        </td>
+                        <td class="py-3 pr-4">
+                            {% if link.payment_status != 'cancelled' %}
+                            <div class="flex items-center gap-2">
+                                <input class="pl-link" readonly value="{{ link.url }}" onclick="this.select()" aria-label="{{ link.course.name }}: {% trans "havola" %}">
+                                <button type="button" class="pl-button pl-button--quiet" style="height: 32px; padding: 0 8px;" data-copy="{{ link.url }}" title="{% trans "Nusxalash" %}" aria-label="{% trans "Nusxalash" %}"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">content_copy</span><span data-copy-label hidden></span></button>
+                                {% if link.cancellable and link.created_by_id %}
+                                <form method="post">{% csrf_token %}<input type="hidden" name="action" value="cancel"><input type="hidden" name="purchase" value="{{ link.pk }}"><button type="submit" class="pl-button pl-button--danger">{% trans "Bekor qilish" %}</button></form>
+                                {% endif %}
+                            </div>
+                            {% else %}<span class="text-base-400">—</span>{% endif %}
+                        </td>
+                        <td class="py-3 text-xs text-base-500 whitespace-nowrap">{{ link.created_by.get_full_name|default:link.created_by.username|default:"—" }}<div>{{ link.created_at|date:"d.m.Y H:i" }}</div></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-sm text-base-500 mb-0">{% trans "Bu mijoz uchun hali havola yaratilmagan." %}</p>
+        {% endif %}
+    </section>
+</div>
+
+<script>
+document.querySelectorAll('[data-copy]').forEach(function (button) {
+    button.addEventListener('click', function () {
+        var label = button.querySelector('[data-copy-label]');
+        var done = function () {
+            if (label && !label.hidden) {
+                label.textContent = '{% trans "Nusxalandi" %}';
+                setTimeout(function () { label.textContent = '{% trans "Nusxalash" %}'; }, 1600);
+            }
+            button.style.background = '#dcfce7';
+            setTimeout(function () { button.style.background = ''; }, 1600);
+        };
+        if (navigator.clipboard) { navigator.clipboard.writeText(button.dataset.copy).then(done); }
+        else { var input = button.parentElement.querySelector('input'); input.select(); document.execCommand('copy'); done(); }
+    });
+});
+</script>
+{% endblock %}

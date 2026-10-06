@@ -1,0 +1,132 @@
+{% load static money %}<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#00213D">
+  <meta name="robots" content="noindex, nofollow">
+  <title>To‘lov — {{ purchase.course.name }}</title>
+  <link rel="icon" href="{% static 'main/brand/norbekov-mark.svg' %}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Prata&display=swap">
+  <link rel="stylesheet" href="{% static 'main/css/telegram-app.css' %}?v={{ asset_version }}">
+  <link rel="stylesheet" href="{% static 'main/css/telegram-app-legal.css' %}?v={{ asset_version }}">
+  <style>
+    .pay-head { padding: calc(16px + env(safe-area-inset-top)) 20px 54px; background: var(--ink); }
+    .pay-head img { width: 172px; height: auto; }
+    .pay-body { position: relative; margin-top: -34px; }
+    .pay-title { margin: 4px 0 0; font-size: 30px; line-height: 1.15; }
+    .notice { margin-top: 18px; padding: 14px 16px; border-radius: 14px; background: var(--mist); color: var(--ink); font-size: 15px; }
+    .notice--error { background: #fde8ec; color: #8f1d34; }
+    .notice--warn { background: var(--saffron-bg); color: var(--saffron); }
+    .pay-form .legal-scroll { height: clamp(240px, 42dvh, 420px); }
+    .pay-done { text-align: center; padding-top: 12px; }
+    .pay-done a { color: var(--lagoon); font-weight: 700; }
+    .legal-consent { margin-top: 12px; font-size: 15px; }
+    .order__row strong { white-space: nowrap; }
+    .order__row span { min-width: 0; }
+  </style>
+</head>
+<body class="no-tabbar">
+  <div class="app">
+    <header class="pay-head"><img src="{% static 'main/brand/norbekov-logo-dark.svg' %}" alt="Norbekov markazi"></header>
+    <main class="page pay-body">
+      <article class="order">
+        <p class="eyebrow">{% if is_debt %}Qolgan to‘lov{% else %}Kurs uchun to‘lov{% endif %}</p>
+        <h1 class="display pay-title">{{ purchase.course.name }}</h1>
+        <div class="order__row"><span>Ishtirokchi</span><strong>{{ members|join:", " }}</strong></div>
+        {% if purchase.group %}
+        <div class="order__row"><span>Boshlanish</span><strong>{{ purchase.group.start_date|date:"d.m.Y" }} · {{ purchase.group.number_of_days }} kun</strong></div>
+        {% if teachers %}<div class="order__row"><span>Ustoz</span><strong>{{ teachers }}</strong></div>{% endif %}
+        {% endif %}
+        {% if is_debt %}
+        <div class="order__row order__row--total"><span>To‘lanadigan summa</span><strong>{{ purchase.total_amount|money }} so‘m</strong></div>
+        {% else %}
+        <div class="order__row"><span>Kurs narxi</span><strong>{{ gross|money }} so‘m</strong></div>
+        {% if purchase.discount_per_person %}<div class="order__row order__row--saving"><span>{{ purchase.discount_name|default:"Chegirma" }}</span><strong>−{{ purchase.discount_per_person|money }} so‘m</strong></div>{% endif %}
+        {% if purchase.social_discount_amount %}<div class="order__row order__row--saving"><span>Imtiyoz chegirmasi</span><strong>−{{ purchase.social_discount_amount|money }} so‘m</strong></div>{% endif %}
+        {% if purchase.is_booking and purchase.booking_discount %}<div class="order__row order__row--saving"><span>Bron chegirmasi{% if not purchase.paid_amount %} (birinchi to‘lovdan keyin){% endif %}</span><strong>−{{ purchase.booking_discount|money }} so‘m</strong></div>{% endif %}
+        <div class="order__row order__row--total"><span>Jami</span><strong>{{ purchase.sale_amount|money }} so‘m</strong></div>
+        {% endif %}
+        {% if purchase.paid_amount %}
+        <div class="order__row"><span>To‘langan</span><strong>{{ purchase.paid_amount|money }} so‘m</strong></div>
+        {% if state == 'open' %}<div class="order__row"><span>Qolgan</span><strong>{{ purchase.payable_amount|money }} so‘m</strong></div>{% endif %}
+        {% endif %}
+      </article>
+
+      {% if error %}<p class="notice notice--error" role="alert">{{ error }}</p>{% endif %}
+
+      {% if state == 'paid' %}
+      <div class="pay-done">
+        <div class="result-mark" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></svg></div>
+        <h2 class="display">To‘lov qabul qilindi</h2>
+        <p class="lead">Rahmat! To‘lov markaz hisobiga yozildi.</p>
+        {% for receipt in receipts %}<p><a href="{{ receipt }}" target="_blank" rel="noopener">Chekni ko‘rish</a></p>{% endfor %}
+      </div>
+      {% elif state == 'cancelled' %}
+      <p class="notice notice--warn">Bu havola bekor qilingan. Yangi havola uchun operatoringizga murojaat qiling.</p>
+      {% elif state == 'refunded' %}
+      <p class="notice notice--warn">Bu to‘lov qaytarilgan. Savollar bo‘lsa, operatoringizga murojaat qiling.</p>
+      {% elif state == 'outdated' %}
+      <p class="notice notice--warn">Bu qarz boshqa yo‘l bilan to‘langan yoki o‘zgargan. Yangi havola uchun operatoringizga murojaat qiling.</p>
+      {% elif busy %}
+      <p class="notice">To‘lov holati tekshirilmoqda. Qayta to‘lamang — bir necha daqiqadan so‘ng sahifani yangilang.</p>
+      {% else %}
+      {% if purchase.paid_amount and state == 'open' %}<p class="notice">To‘lovning bir qismi qabul qilingan. Qolganini shu yerda to‘lashingiz mumkin.</p>{% endif %}
+      {% if continue_url %}
+      <p class="notice">{{ open_amount|money }} so‘mlik to‘lov sahifasi ochilgan. To‘lagan bo‘lsangiz, bir necha soniyadan so‘ng sahifani yangilang.</p>
+      {% endif %}
+      <form method="post" class="pay-form" id="payForm">
+        {% csrf_token %}
+        <input type="hidden" name="expected_paid" value="{{ purchase.paid_amount|plain_amount }}">
+        {% if needs_contract %}
+        <section class="contract" aria-labelledby="contractHeading">
+          <div class="block__head"><h3 id="contractHeading">Xizmat shartnomasi</h3><span id="contractHint">Oxirigacha o‘qing</span></div>
+          <div class="legal-progress" aria-hidden="true"><span id="contractProgress"></span></div>
+          <div class="legal-scroll" id="contractScroll" tabindex="0" aria-label="Xizmat shartnomasi matni">{{ contract_html|safe }}</div>
+          <input type="hidden" name="version" value="{{ contract_version }}">
+          <label class="legal-consent"><input type="checkbox" name="consent" id="contractConsent" disabled><span>Shartnoma va sog‘liq bo‘yicha alohida shartlarni o‘qidim hamda qabul qilaman.</span></label>
+        </section>
+        {% endif %}
+        {% if purchase.is_booking %}
+        <div class="field">
+          <label for="amount">Hozir to‘laydigan summa (so‘m)</label>
+          <input id="amount" name="amount" type="number" inputmode="decimal" step="0.01" min="{{ purchase.minimum_payment|plain_amount }}" max="{{ purchase.payable_amount|plain_amount }}" value="{% if open_invoice %}{{ open_amount|plain_amount }}{% else %}{{ default_amount|plain_amount }}{% endif %}"{% if open_invoice %} readonly{% endif %} required>
+          <p class="hint">Kamida {{ purchase.minimum_payment|money }} so‘m, ko‘pi bilan {{ purchase.payable_amount|money }} so‘m.</p>
+        </div>
+        {% endif %}
+        <button type="submit" class="btn btn--primary btn--wide" id="payButton"{% if needs_contract %} disabled{% endif %}>{% if needs_contract %}Shartnomani qabul qilaman va to‘layman{% elif continue_url %}To‘lovni davom ettirish{% else %}To‘lash{% endif %}</button>
+        {% if demo %}<button type="submit" name="demo" value="1" class="btn btn--quiet btn--wide" id="demoButton"{% if needs_contract %} disabled{% endif %}>Demo to‘lov (faqat lokal)</button>{% endif %}
+        <p class="fine">To‘lov Multicard xavfsiz sahifasida amalga oshiriladi. Yakunlagach, shu sahifaga qaytasiz.</p>
+      </form>
+      {% endif %}
+    </main>
+  </div>
+  {% if needs_contract and state == 'open' and not busy %}
+  <script>
+  (() => {
+    const scroll = document.getElementById('contractScroll');
+    const progress = document.getElementById('contractProgress');
+    const consent = document.getElementById('contractConsent');
+    const hint = document.getElementById('contractHint');
+    const buttons = [document.getElementById('payButton'), document.getElementById('demoButton')].filter(Boolean);
+    const update = () => {
+      const max = Math.max(scroll.scrollHeight - scroll.clientHeight, 0);
+      const ratio = max ? Math.min(scroll.scrollTop / max, 1) : 1;
+      progress.style.width = `${Math.round(ratio * 100)}%`;
+      if (ratio >= 0.995 && consent.disabled) {
+        consent.disabled = false;
+        hint.textContent = 'O‘qildi';
+        hint.classList.add('is-read');
+      }
+      buttons.forEach(button => { button.disabled = !consent.checked; });
+    };
+    scroll.addEventListener('scroll', update);
+    consent.addEventListener('change', update);
+    update();
+  })();
+  </script>
+  {% endif %}
+</body>
+</html>
