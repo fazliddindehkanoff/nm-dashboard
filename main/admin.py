@@ -733,7 +733,7 @@ class ClientAdmin(ModelAdmin):
             action = request.POST.get('action')
             try:
                 if action == 'course':
-                    group = Group.objects.upcoming().select_related('course').get(pk=request.POST.get('group'))
+                    group = Group.objects.filter(is_active=True).select_related('course').get(pk=request.POST.get('group'))
                     purchase = payment_links.create_course_link(
                         client, group, request.POST.get('payment_mode', 'full'), request.user,
                     )
@@ -757,7 +757,8 @@ class ClientAdmin(ModelAdmin):
             self.message_user(request, _("To'lov havolasi tayyor. Uni mijozga yuboring."), messages.SUCCESS)
             return redirect(f"{page}?created={purchase.pk}")
 
-        groups = Group.objects.upcoming().select_related('course').prefetch_related('teachers').order_by('start_date', 'id')
+        # Groups that have started still take clients; only archived ones are hidden.
+        groups = Group.objects.filter(is_active=True).select_related('course').prefetch_related('teachers').order_by('start_date', 'id')
         links = list(self._client_links(client).prefetch_related('multicard_invoices', 'members')[:20])
         for link in links:
             link.url = request.build_absolute_uri(reverse('main:payment_link', args=[link.link_token]))
@@ -768,6 +769,7 @@ class ClientAdmin(ModelAdmin):
             "title": _("To'lov havolasi"),
             "client": client,
             "groups": groups,
+            "today": timezone.localdate(),
             "debts": payment_links.open_debts(client),
             "links": links,
             "created": created,

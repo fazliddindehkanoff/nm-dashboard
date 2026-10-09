@@ -429,12 +429,15 @@
       ? `${quote.bookingDiscount ? `<b class="saving">−${money(quote.bookingDiscount)} chegirma.</b> ` : ''}Hozir kamida ${money(quote.minimum)}, qolganini keyinroq to‘laysiz.`
       : 'Bu summa uchun bron qilib bo‘lmaydi.';
     $('#bookingSum').textContent = money(quote.total - quote.bookingDiscount);
-    $('#fullSum').textContent = money(quote.total);
+    // Paying in full before the group starts earns the same discount as booking.
+    $('#fullSum').textContent = money(quote.total - quote.bookingDiscount);
+    $('#fullText').innerHTML = quote.bookingDiscount
+      ? `<b class="saving">−${money(quote.bookingDiscount)} chegirma.</b> Butun summa bir martada to‘lanadi.`
+      : 'Butun summa bir martada to‘lanadi.';
     $$('[data-pay-mode]').forEach(button => button.setAttribute('aria-checked', String(button.dataset.payMode === state.payMode)));
 
-    const bookingSaving = state.payMode === 'booking' ? quote.bookingDiscount : 0;
-    const saving = quote.perPerson * quote.count + quote.social + bookingSaving;
-    $('#buyTotal').textContent = money(quote.total - bookingSaving);
+    const saving = quote.perPerson * quote.count + quote.social + quote.bookingDiscount;
+    $('#buyTotal').textContent = money(quote.total - quote.bookingDiscount);
     $('#buyNote').innerHTML = `${quote.count} kishi${saving ? ` · <b class="saving">−${money(saving)}</b>` : ''}`;
   }
 
@@ -543,7 +546,7 @@
       + row(`Kurs narxi${purchase.participant_count > 1 ? ` · ${purchase.participant_count} kishi` : ''}`, money(gross))
       + (Number(purchase.discount_total) > 0 ? row(escapeHtml(purchase.discount_name || 'Oila chegirmasi'), `−${money(purchase.discount_total)}`, 'order__row--saving') : '')
       + (Number(purchase.social_discount_amount) > 0 ? row('Imtiyoz chegirmasi', `−${money(purchase.social_discount_amount)}`, 'order__row--saving') : '')
-      + (purchase.is_booking && Number(purchase.booking_discount) > 0 ? row(paid ? 'Bron chegirmasi' : 'Bron chegirmasi (birinchi to‘lovdan keyin)', `−${money(purchase.booking_discount)}`, 'order__row--saving') : '')
+      + (Number(purchase.booking_discount) > 0 ? row(!purchase.is_booking ? 'Oldindan to‘liq to‘lov chegirmasi' : paid ? 'Bron chegirmasi' : 'Bron chegirmasi (birinchi to‘lovdan keyin)', `−${money(purchase.booking_discount)}`, 'order__row--saving') : '')
       + row('Jami', money(purchase.sale_amount), 'order__row--total')
       + (paid ? row('To‘langan', money(purchase.paid_amount)) + row('Qolgan', money(purchase.payable_amount)) : '');
     bindCovers($('#orderSummary'));

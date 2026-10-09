@@ -51,7 +51,7 @@
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section class="pl-card" aria-labelledby="courseTitle">
             <h2 id="courseTitle" class="font-semibold text-base mb-1">{% trans "Yangi kurs uchun" %}</h2>
-            <p class="text-sm text-base-500 mb-4">{% trans "Narx va chegirmalar web app'dagi kabi hisoblanadi." %}</p>
+            <p class="text-sm text-base-500 mb-4">{% trans "Narx va chegirmalar web app'dagi kabi hisoblanadi. Kurs boshlanishidan oldin to'langanda bron chegirmasi bron va to'liq to'lovga ham qo'llanadi; boshlangan guruhda chegirma yo'q." %}</p>
             {% if groups %}
             <form method="post" class="flex flex-col gap-4">
                 {% csrf_token %}
@@ -60,7 +60,7 @@
                     <label class="pl-label" for="group">{% trans "Guruh" %}</label>
                     <select class="pl-input" id="group" name="group" required>
                         {% for group in groups %}
-                        <option value="{{ group.pk }}">{{ group.start_date|date:"d.m.Y" }} · {{ group.course.name }}{% for teacher in group.teachers.all %}{% if forloop.first %} · {% endif %}{{ teacher.full_name }}{% if not forloop.last %}, {% endif %}{% endfor %} · {{ group.course.price|money }} so‘m</option>
+                        <option value="{{ group.pk }}">{{ group.start_date|date:"d.m.Y" }}{% if group.start_date <= today %} ({% trans "boshlangan" %}){% endif %} · {{ group.course.name }}{% for teacher in group.teachers.all %}{% if forloop.first %} · {% endif %}{{ teacher.full_name }}{% if not forloop.last %}, {% endif %}{% endfor %} · {{ group.course.price|money }} so‘m</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -74,7 +74,7 @@
                 <div><button type="submit" class="pl-button"><span class="material-symbols-outlined text-[18px]" aria-hidden="true">add_link</span>{% trans "Havola yaratish" %}</button></div>
             </form>
             {% else %}
-            <p class="text-sm text-base-500">{% trans "Hozir qabul ochiq guruh yo'q." %}</p>
+            <p class="text-sm text-base-500">{% trans "Faol guruh yo'q." %}</p>
             {% endif %}
         </section>
 

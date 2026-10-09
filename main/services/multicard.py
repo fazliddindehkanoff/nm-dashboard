@@ -136,6 +136,9 @@ class MulticardClient:
             # An installment is one payment towards the course, not N full fees.
             item.update(qty=1, price=invoice.amount,
                         name=f'{purchase.course.name} — qisman to‘lov')
+        elif purchase.booking_discount:
+            # The whole course paid early, at the discounted price.
+            item.update(qty=1, price=invoice.amount)
         if self.config.get('OFD_VAT', '') != '':
             item['vat'] = int(self.config['OFD_VAT'])
         return self._request('POST', '/payment/invoice', {
@@ -237,7 +240,7 @@ def _settle(invoice, payment_uuid, receipt_url='', provider='multicard'):
     amount = Decimal(invoice.amount) / 100
     if amount > purchase.payable_amount:
         raise InvalidCallback('Payment exceeds outstanding balance')
-    discount = purchase.booking_discount if purchase.is_booking else Decimal(0)
+    discount = purchase.booking_discount
     paid = purchase.paid_amount + amount
     status = (MiniAppPurchase.PAYMENT_SUCCESS if paid >= purchase.total_amount - discount
               else MiniAppPurchase.PAYMENT_PARTIAL)
@@ -331,7 +334,7 @@ def reconcile_invoice(invoice):
             # Recalculate from settled installments: repeated refunds are idempotent.
             paid = sum((Decimal(value) / 100 for value in
                         purchase.multicard_invoices.filter(state='success').values_list('amount', flat=True)), Decimal(0))
-            discount = purchase.booking_discount if purchase.is_booking and paid > 0 else Decimal(0)
+            discount = purchase.booking_discount if paid > 0 else Decimal(0)
             purchase_status = (MiniAppPurchase.PAYMENT_REFUNDED if paid == 0 else
                                MiniAppPurchase.PAYMENT_SUCCESS if paid >= purchase.total_amount - discount else
                                MiniAppPurchase.PAYMENT_PARTIAL)

@@ -46,7 +46,7 @@
         <div class="order__row"><span>Kurs narxi</span><strong>{{ gross|money }} so‘m</strong></div>
         {% if purchase.discount_per_person %}<div class="order__row order__row--saving"><span>{{ purchase.discount_name|default:"Chegirma" }}</span><strong>−{{ purchase.discount_per_person|money }} so‘m</strong></div>{% endif %}
         {% if purchase.social_discount_amount %}<div class="order__row order__row--saving"><span>Imtiyoz chegirmasi</span><strong>−{{ purchase.social_discount_amount|money }} so‘m</strong></div>{% endif %}
-        {% if purchase.is_booking and purchase.booking_discount %}<div class="order__row order__row--saving"><span>Bron chegirmasi{% if not purchase.paid_amount %} (birinchi to‘lovdan keyin){% endif %}</span><strong>−{{ purchase.booking_discount|money }} so‘m</strong></div>{% endif %}
+        {% if purchase.booking_discount %}<div class="order__row order__row--saving"><span>{% if purchase.is_booking %}Bron chegirmasi{% if not purchase.paid_amount %} (birinchi to‘lovdan keyin){% endif %}{% else %}Oldindan to‘liq to‘lov chegirmasi{% endif %}</span><strong>−{{ purchase.booking_discount|money }} so‘m</strong></div>{% endif %}
         <div class="order__row order__row--total"><span>Jami</span><strong>{{ purchase.sale_amount|money }} so‘m</strong></div>
         {% endif %}
         {% if purchase.paid_amount %}

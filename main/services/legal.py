@@ -16,7 +16,7 @@ BOOKING_CONTRACT_VERSION = '2026-09-16.booking'
 
 def contract_version(purchase):
     if not purchase.is_booking:
-        return CONTRACT_VERSION
+        return f'{CONTRACT_VERSION}.early' if purchase.booking_discount else CONTRACT_VERSION
     minimum = PaymentSettings.booking_minimum()
     if minimum == 100000:
         return BOOKING_CONTRACT_VERSION

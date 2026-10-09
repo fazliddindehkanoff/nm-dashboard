@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
@@ -294,6 +295,9 @@ class Discount(models.Model):
             min_participants__lte=participant_count,
         ).first()
 
+# Full payments made before the group starts get the booking discount from this date on.
+EARLY_FULL_PAYMENT_DISCOUNT_SINCE = date(2026, 10, 9)
+
 PAYMENT_METHODS = (("naqd", "Naqd"), ("terminal", "Terminal"), ("rahmat", "Rahmat"))
 
 
@@ -412,7 +416,7 @@ class Transaction(models.Model):
             return self._mini_app_discount_total(participant_count)
         course_id = self.group.course_id if self.group else None
         booking_discount = Decimal(0)
-        if self.payment_type == 'bron':
+        if self.payment_type == 'bron' or self._early_full_payment():
             booking = Discount.for_course(course_id).filter(
                 is_booking=True,
             ).order_by(models.F('course_id').desc(nulls_last=True), '-amount', 'pk').first()
@@ -427,6 +431,13 @@ class Transaction(models.Model):
             if rule:
                 additional_discount = max(additional_discount, rule.amount * participant_count)
         return booking_discount + additional_discount
+
+    def _early_full_payment(self):
+        # Only payments entered from this rule's start date: older records keep their totals.
+        return (
+            self.payment_type == 'to_liq_tolov' and self.group is not None and self.date is not None
+            and EARLY_FULL_PAYMENT_DISCOUNT_SINCE <= self.date < self.group.start_date
+        )
 
     def _mini_app_discount_total(self, participant_count):
         # Web app prices, family/social/booking discounts are fixed at checkout;
@@ -1219,7 +1230,7 @@ class MiniAppPurchase(models.Model):
         return member.phone_number if member else ''
 
     def mark_paid(self, reference=''):
-        self.discount_amount = self.booking_discount if self.is_booking else Decimal(0)
+        self.discount_amount = self.booking_discount
         self.paid_amount = self.total_amount - self.discount_amount
         self.payment_status = self.PAYMENT_SUCCESS
         self.payment_reference = reference or f"DEMO-{self.pk}"
@@ -1227,10 +1238,14 @@ class MiniAppPurchase(models.Model):
         self.save(update_fields=('discount_amount', 'paid_amount', 'payment_status', 'payment_reference', 'paid_at', 'updated_at'))
 
     @property
+    def agreed_discount(self):
+        """The early-payment discount fixed at checkout; older full payments had none."""
+        return max(self.booking_discount, self.discount_amount)
+
+    @property
     def sale_amount(self):
         """Sale value after every discount, including the agreed booking discount."""
-        discount = self.booking_discount if self.is_booking else self.discount_amount
-        return max(self.total_amount - discount, Decimal(0))
+        return max(self.total_amount - self.agreed_discount, Decimal(0))
 
     @property
     def remaining_amount(self):
@@ -1239,8 +1254,7 @@ class MiniAppPurchase(models.Model):
     @property
     def payable_amount(self):
         """Maximum next payment, including the agreed first-payment discount."""
-        discount = self.booking_discount if self.is_booking else self.discount_amount
-        return max(self.total_amount - discount - self.paid_amount, Decimal(0))
+        return max(self.total_amount - self.agreed_discount - self.paid_amount, Decimal(0))
 
     @property
     def minimum_payment(self):

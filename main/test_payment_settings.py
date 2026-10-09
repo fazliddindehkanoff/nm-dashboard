@@ -81,6 +81,9 @@ class ConfiguredPaymentTests(TestCase):
         self.assertNotEqual(contract_version(self.purchase), version)
         self.assertEqual(self.pay('200000').status_code, 409)
         self.purchase.is_booking = False
+        # Paying in full before the start keeps the discount, which the contract states.
+        self.assertEqual(contract_version(self.purchase), f'{CONTRACT_VERSION}.early')
+        self.purchase.booking_discount = 0
         self.assertEqual(contract_version(self.purchase), CONTRACT_VERSION)
 
 

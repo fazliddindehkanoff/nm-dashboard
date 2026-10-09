@@ -67,8 +67,8 @@ def _buyer(client):
 
 def create_course_link(client, group, payment_mode, creator):
     """A course order for the client that they pay on the link page."""
-    if not group.is_active or group.start_date <= timezone.localdate():
-        raise ValueError("Bu guruh boshlangan yoki faol emas. Boshqa guruhni tanlang.")
+    if not group.is_active:
+        raise ValueError("Bu guruh faol emas. Boshqa guruhni tanlang.")
     joined = TransactionClient.objects.filter(
         client=client, transaction__group=group, transaction__is_refunded=False,
     ).exists() or MiniAppPurchase.objects.filter(
@@ -81,7 +81,8 @@ def create_course_link(client, group, payment_mode, creator):
             "Qarz bo'lsa, «Qarzni to'lash uchun» bo'limidan foydalaning."
         )
     participant = _buyer(client)
-    price = quote(group.course, [participant], payment_mode)
+    # A group that has started still takes new clients, without the early-payment discount.
+    price = quote(group.course, [participant], payment_mode, early=group.start_date > timezone.localdate())
     booking = payment_mode == MiniAppCartItem.MODE_BOOKING
     if booking and not price['booking_available']:
         raise ValueError("Bu kurs uchun bron summasi yetarli emas. To'liq to'lovni tanlang.")

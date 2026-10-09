@@ -13,6 +13,9 @@
     <p><span>Bron to‘lovi tasdiqlangach qo‘llanadigan chegirma</span><strong>{{ purchase.booking_discount|floatformat:0 }} UZS</strong></p>
     <p><span>Har bir ishtirokchi uchun eng kam bron to‘lovi</span><strong>{{ minimum_booking_display }} UZS</strong></p>
     <p>Bron to‘lovi kurs narxining bir qismi hisoblanadi. To‘lov tasdiqlangach bron chegirmasi har bir ishtirokchiga bir marta qo‘llanadi. Qolgan qarz — jami xizmat haqi, chegirma va tasdiqlangan to‘lovlar farqi. Qolgan summani keyingi to‘lovlar bilan to‘lash mumkin.</p>
+    {% elif purchase.booking_discount %}
+    <p><span>Kurs boshlanishidan oldin to‘liq to‘lov chegirmasi</span><strong>{{ purchase.booking_discount|floatformat:0 }} UZS</strong></p>
+    <p><span>To‘lanadigan summa</span><strong>{{ purchase.sale_amount|floatformat:0 }} UZS</strong></p>
     {% endif %}
   </div>
 
