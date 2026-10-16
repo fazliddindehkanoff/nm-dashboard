@@ -129,7 +129,7 @@
 .legal-document__meta,
 .legal-document__purchase {
   display: grid;
-  grid-template-columns: minmax(105px, .8fr) 1.5fr;
+  grid-template-columns: minmax(110px, 1fr) minmax(0, 1.3fr);
   gap: 0;
   margin-bottom: 18px;
   overflow: hidden;
@@ -159,6 +159,7 @@
 .legal-document__purchase strong {
   color: var(--ink);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .legal-document__purchase p {
@@ -167,6 +168,17 @@
 
 .legal-document__purchase p:last-child > * {
   border-bottom: 0;
+}
+
+/* A plain-text note spans both columns instead of falling into the label column. */
+.legal-document__purchase .legal-document__purchase-note {
+  display: block;
+  grid-column: 1 / -1;
+  padding: 10px 11px;
+  background: var(--ice);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .legal-document__lead {

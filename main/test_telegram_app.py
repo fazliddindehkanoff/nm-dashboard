@@ -161,7 +161,7 @@ class TelegramMiniAppTests(TestCase):
         )
         self.assertEqual(contract.status_code, 200)
         self.assertIn('Sog‘lomlashtirish kursi', contract.json()['document']['html'])
-        self.assertIn('4500000', contract.json()['document']['html'])
+        self.assertIn('4 500 000 UZS', contract.json()['document']['html'])
 
         payment_without_contract = self.post_json(
             reverse('main:telegram_app_simulate_payment', args=[purchase_id]), {},

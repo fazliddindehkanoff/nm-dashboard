@@ -1,3 +1,4 @@
+{% load money %}
 <article class="legal-document legal-document--contract">
   <div class="legal-document__purchase">
     <p><span>Shartnoma</span><strong>№ {{ purchase.uuid }}</strong></p>
@@ -7,15 +8,15 @@
     <p><span>Kurs</span><strong>{{ purchase.course.name }}</strong></p>
     {% if purchase.group %}<p><span>Guruh boshlanishi</span><strong>{{ purchase.group.start_date|date:"d.m.Y" }}</strong></p>{% endif %}
     <p><span>Ishtirokchilar</span><strong>{{ purchase.participant_count }} kishi</strong></p>
-    {% if purchase.social_discount_amount %}<p><span>Hujjat asosida hisoblangan ijtimoiy chegirma</span><strong>{{ purchase.social_discount_amount|floatformat:0 }} UZS</strong></p>{% endif %}
-    <p><span>Jami xizmat haqi</span><strong>{{ purchase.total_amount|floatformat:0 }} UZS</strong></p>
+    {% if purchase.social_discount_amount %}<p><span>Hujjat asosida hisoblangan ijtimoiy chegirma</span><strong>{{ purchase.social_discount_amount|money }} UZS</strong></p>{% endif %}
+    <p><span>Jami xizmat haqi</span><strong>{{ purchase.total_amount|money }} UZS</strong></p>
     {% if purchase.is_booking %}
-    <p><span>Bron to‘lovi tasdiqlangach qo‘llanadigan chegirma</span><strong>{{ purchase.booking_discount|floatformat:0 }} UZS</strong></p>
+    <p><span>Bron to‘lovi tasdiqlangach qo‘llanadigan chegirma</span><strong>{{ purchase.booking_discount|money }} UZS</strong></p>
     <p><span>Har bir ishtirokchi uchun eng kam bron to‘lovi</span><strong>{{ minimum_booking_display }} UZS</strong></p>
-    <p>Bron to‘lovi kurs narxining bir qismi hisoblanadi. To‘lov tasdiqlangach bron chegirmasi har bir ishtirokchiga bir marta qo‘llanadi. Qolgan qarz — jami xizmat haqi, chegirma va tasdiqlangan to‘lovlar farqi. Qolgan summani keyingi to‘lovlar bilan to‘lash mumkin.</p>
+    <p class="legal-document__purchase-note">Bron to‘lovi kurs narxining bir qismi hisoblanadi. To‘lov tasdiqlangach bron chegirmasi har bir ishtirokchiga bir marta qo‘llanadi. Qolgan qarz — jami xizmat haqi, chegirma va tasdiqlangan to‘lovlar farqi. Qolgan summani keyingi to‘lovlar bilan to‘lash mumkin.</p>
     {% elif purchase.booking_discount %}
-    <p><span>Kurs boshlanishidan oldin to‘liq to‘lov chegirmasi</span><strong>{{ purchase.booking_discount|floatformat:0 }} UZS</strong></p>
-    <p><span>To‘lanadigan summa</span><strong>{{ purchase.sale_amount|floatformat:0 }} UZS</strong></p>
+    <p><span>Kurs boshlanishidan oldin to‘liq to‘lov chegirmasi</span><strong>{{ purchase.booking_discount|money }} UZS</strong></p>
+    <p><span>To‘lanadigan summa</span><strong>{{ purchase.sale_amount|money }} UZS</strong></p>
     {% endif %}
   </div>
 
