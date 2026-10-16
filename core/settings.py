@@ -256,8 +256,8 @@ UNFOLD = {
     "SITE_HEADER": "Norbekov Markazi",
     "SITE_URL": "/",
     "SITE_LOGO": {
-        "light": "/static/main/brand/norbekov-logo-light.svg",
-        "dark": "/static/main/brand/norbekov-logo-dark.svg",
+        "light": f"/static/main/brand/norbekov-logo-light.svg?v={_asset_version('main/static/main/brand/norbekov-logo-light.svg')}",
+        "dark": f"/static/main/brand/norbekov-logo-dark.svg?v={_asset_version('main/static/main/brand/norbekov-logo-dark.svg')}",
     },
     "SITE_ICON": {
         "light": "/static/main/brand/norbekov-mark.svg",

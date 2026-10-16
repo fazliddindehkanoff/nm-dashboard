@@ -78,6 +78,7 @@ def _telegram_asset_version():
         'main/static/main/css/telegram-app-icons.css',
         'main/static/main/css/telegram-app-legal.css',
         'main/static/main/js/telegram-app.js',
+        'main/static/main/brand/norbekov-logo-dark.svg',
     ):
         digest.update((settings.BASE_DIR / relative_path).read_bytes())
     return digest.hexdigest()[:12]
