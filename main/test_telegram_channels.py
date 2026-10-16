@@ -74,7 +74,7 @@ class ChannelAccessTests(ChannelTestMixin, TestCase):
         self.course = Course.objects.create(name='Sog‘lomlashtirish', price=Decimal('2000000'), number_of_days=10)
         self.group = Group.objects.create(
             course=self.course, start_date=timezone.localdate() + timedelta(days=2),
-            telegram_channel_id=CHANNEL, telegram_channel_title='NM kanal', channel_removal_days=3,
+            telegram_channel_id=CHANNEL, telegram_channel_title='NM guruh', channel_removal_days=3,
         )
         self.buyer = Client.objects.create(full_name='Kanal Mijoz', phone_number='+998 90 123 45 67')
         TelegramUser.objects.create(
@@ -96,7 +96,7 @@ class ChannelAccessTests(ChannelTestMixin, TestCase):
 
     def join(self, user_id, link):
         process_telegram_update({'update_id': 1, 'chat_join_request': {
-            'chat': {'id': int(CHANNEL), 'type': 'channel'}, 'from': {'id': user_id}, 'user_chat_id': user_id,
+            'chat': {'id': int(CHANNEL), 'type': 'supergroup'}, 'from': {'id': user_id}, 'user_chat_id': user_id,
             'date': 0, 'invite_link': {'invite_link': link, 'creates_join_request': True},
         }})
 
@@ -156,7 +156,7 @@ class ChannelAccessTests(ChannelTestMixin, TestCase):
         self.assertEqual(len(self.bot.called('revokeChatInviteLink')), 1)
         self.assertEqual({message['chat_id'] for message in self.sent}, {5551, 7777})
         self.assertIn("Qolgan to'lov: <b>1 500 000 so'm</b>", self.sent[0]['text'])
-        self.assertIn("To'lovni to'liq qilsangiz, sizni kanalga qaytaramiz.", self.sent[0]['text'])
+        self.assertIn("To'lovni to'liq qilsangiz, sizni guruhga qaytaramiz.", self.sent[0]['text'])
 
         # The general link cannot bring a debtor back.
         self.join(7777, 'https://t.me/+general')
@@ -171,7 +171,7 @@ class ChannelAccessTests(ChannelTestMixin, TestCase):
         )
         self.assertEqual(member.status, TelegramChannelMember.STATUS_INVITED)
         self.assertIn("To'lovingiz to'liq qabul qilindi", self.sent[0]['text'])
-        self.assertEqual(self.sent[0]['markup']['inline_keyboard'][0][0]['text'], 'Kanalga qaytish')
+        self.assertEqual(self.sent[0]['markup']['inline_keyboard'][0][0]['text'], 'Guruhga qaytish')
 
         self.join(7777, member.invite_link)
         member = self.member()
@@ -262,17 +262,17 @@ class GroupChannelAdminTests(ChannelTestMixin, TestCase):
 
     def test_group_is_not_created_when_the_bot_is_not_an_admin(self):
         self.bot.responses.update(
-            getChat={'id': int(CHANNEL), 'type': 'channel', 'title': 'NM kanal'},
+            getChat={'id': int(CHANNEL), 'type': 'supergroup', 'title': 'NM guruh'},
             getChatMember={'status': 'left'},
         )
         response = self.add_group(telegram_channel_id=CHANNEL, channel_removal_days='3')
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Bot «NM kanal» kanalida admin emas')
+        self.assertContains(response, 'Bot «NM guruh» guruhida admin emas')
         self.assertFalse(Group.objects.exists())
 
     def test_group_is_not_created_without_ban_and_invite_rights(self):
         self.bot.responses.update(
-            getChat={'id': int(CHANNEL), 'type': 'channel', 'title': 'NM kanal'},
+            getChat={'id': int(CHANNEL), 'type': 'supergroup', 'title': 'NM guruh'},
             getChatMember={'status': 'administrator', 'can_invite_users': True, 'can_restrict_members': False},
         )
         response = self.add_group(telegram_channel_id=CHANNEL)
@@ -282,25 +282,32 @@ class GroupChannelAdminTests(ChannelTestMixin, TestCase):
     def test_group_is_not_created_for_an_unknown_channel(self):
         self.bot.responses['getChat'] = TelegramAPIError('Bad Request: chat not found', retryable=False)
         response = self.add_group(telegram_channel_id=CHANNEL)
-        self.assertContains(response, 'Kanal topilmadi yoki bot kanalga qo')
+        self.assertContains(response, 'Telegram guruh topilmadi yoki bot guruhga qo')
+        self.assertFalse(Group.objects.exists())
+
+    def test_basic_group_must_become_a_supergroup_first(self):
+        self.bot.responses['getChat'] = {'id': -123456789, 'type': 'group', 'title': 'NM guruh'}
+        response = self.add_group(telegram_channel_id='-123456789')
+        self.assertContains(response, 'Bu oddiy Telegram guruh')
+        self.assertEqual(self.bot.called('getChatMember'), [])
         self.assertFalse(Group.objects.exists())
 
     def test_group_is_created_when_the_bot_can_manage_the_channel(self):
         self.bot.responses.update(
-            getChat={'id': int(CHANNEL), 'type': 'channel', 'title': 'NM kanal'}, getChatMember=ADMIN_RIGHTS,
+            getChat={'id': int(CHANNEL), 'type': 'supergroup', 'title': 'NM guruh'}, getChatMember=ADMIN_RIGHTS,
         )
-        response = self.add_group(telegram_channel_id='@nm_kanal', channel_removal_days='3')
+        response = self.add_group(telegram_channel_id='@nm_guruh', channel_removal_days='3')
         self.assertEqual(response.status_code, 302)
         group = Group.objects.get()
         self.assertEqual(
             (group.telegram_channel_id, group.telegram_channel_title, group.channel_removal_days),
-            (CHANNEL, 'NM kanal', 3),
+            (CHANNEL, 'NM guruh', 3),
         )
         self.assertEqual(self.bot.called('getChatMember'), [{'chat_id': int(CHANNEL), 'user_id': 123456}])
 
     def test_removal_days_need_a_channel(self):
         response = self.add_group(channel_removal_days='3')
-        self.assertContains(response, 'Avval Telegram kanal ID sini kiriting.')
+        self.assertContains(response, 'Avval Telegram guruh ID sini kiriting.')
         self.assertFalse(Group.objects.exists())
 
     def test_connecting_a_channel_to_an_existing_group_invites_paid_clients(self):
@@ -314,7 +321,7 @@ class GroupChannelAdminTests(ChannelTestMixin, TestCase):
         self.assertFalse(TelegramChannelMember.objects.exists())  # no channel yet
 
         self.bot.responses.update(
-            getChat={'id': int(CHANNEL), 'type': 'channel', 'title': 'NM kanal'}, getChatMember=ADMIN_RIGHTS,
+            getChat={'id': int(CHANNEL), 'type': 'supergroup', 'title': 'NM guruh'}, getChatMember=ADMIN_RIGHTS,
         )
         response = self.client.post(reverse('admin:main_group_change', args=[group.pk]), {
             'course': str(self.course.pk), 'start_date': group.start_date.isoformat(), 'number_of_days': '10',
@@ -336,7 +343,7 @@ class GroupChannelAdminTests(ChannelTestMixin, TestCase):
     def test_channel_tab_lists_members_and_resends_links(self):
         group = Group.objects.create(
             course=self.course, start_date=timezone.localdate() + timedelta(days=5),
-            telegram_channel_id=CHANNEL, telegram_channel_title='NM kanal', channel_removal_days=3,
+            telegram_channel_id=CHANNEL, telegram_channel_title='NM guruh', channel_removal_days=3,
         )
         client = Client.objects.create(full_name='Havola Kutayotgan', phone_number='+998902222222')
         member = TelegramChannelMember.objects.create(
@@ -346,7 +353,7 @@ class GroupChannelAdminTests(ChannelTestMixin, TestCase):
         response = self.client.get(reverse('admin:main_group_detail', args=[group.pk]) + '?tab=channel')
         self.assertContains(response, 'Havola Kutayotgan')
         self.assertContains(response, 'https://t.me/+personal-link')
-        self.assertContains(response, 'NM kanal')
+        self.assertContains(response, 'NM guruh')
 
         response = self.client.post(reverse('admin:main_group_channel_resend', args=[group.pk, member.pk]))
         self.assertEqual(response.status_code, 302)

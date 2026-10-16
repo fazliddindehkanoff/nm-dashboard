@@ -1,6 +1,7 @@
-"""Telegram channel access for paid group members.
+"""Telegram group access for paid course group members.
 
-A group may name a Telegram channel where our bot is an administrator. Every
+A course group may name a Telegram group (supergroup) where our bot is an
+administrator; channels work the same way. Every
 client with a confirmed payment gets a personal join-request link and the bot
 approves only that client's request. ``channel_removal_days`` after the group
 starts, clients who still owe money are banned and told how to come back;
@@ -51,11 +52,17 @@ def check_channel(value):
     """Return ``(chat_id, title)`` when our bot can manage the channel, else raise ``ChannelSetupError``."""
     chat_id = normalise_channel_id(value)
     if not re.fullmatch(r'-\d{5,}|@[A-Za-z][A-Za-z0-9_]{3,}', chat_id):
-        raise ChannelSetupError("Kanal ID sini -1001234567890 yoki @kanal_nomi ko'rinishida kiriting.")
+        raise ChannelSetupError("Telegram guruh ID sini -1001234567890 yoki @guruh_nomi ko'rinishida kiriting.")
     try:
         chat = bot_api('getChat', chat_id=chat_id)
+        if chat.get('type') == 'group':
+            # Basic groups have no join requests or ban list; Telegram upgrades them to supergroups.
+            raise ChannelSetupError(
+                "Bu oddiy Telegram guruh. Guruh sozlamalarida «Chat history for new members» ni «Visible» qiling — "
+                "guruh supergroupga aylanadi va yangi ID oladi. Keyin yangi ID ni kiriting."
+            )
         if chat.get('type') not in ('channel', 'supergroup'):
-            raise ChannelSetupError("Bu ID kanalga tegishli emas. Telegram kanal ID sini kiriting.")
+            raise ChannelSetupError("Bu ID Telegram guruhga tegishli emas. Telegram guruh ID sini kiriting.")
         membership = bot_api('getChatMember', chat_id=chat['id'], user_id=bot_user_id())
     except TelegramNotConfigured as exc:
         raise ChannelSetupError(str(exc))
@@ -63,15 +70,15 @@ def check_channel(value):
         if exc.retryable:
             raise ChannelSetupError(f"Telegram bilan bog'lanib bo'lmadi, birozdan keyin qayta urinib ko'ring. ({exc})")
         raise ChannelSetupError(
-            "Kanal topilmadi yoki bot kanalga qo'shilmagan. Kanal ID sini tekshiring va botni kanalga admin qiling."
+            "Telegram guruh topilmadi yoki bot guruhga qo'shilmagan. Guruh ID sini tekshiring va botni guruhga admin qiling."
         )
     title = chat.get('title') or chat_id
     if membership.get('status') != 'administrator':
-        raise ChannelSetupError(f"Bot «{title}» kanalida admin emas. Botni kanalga admin qilib qo'shing.")
+        raise ChannelSetupError(f"Bot «{title}» guruhida admin emas. Botni guruhga admin qilib qo'shing.")
     missing = [label for right, label in REQUIRED_RIGHTS if not membership.get(right)]
     if missing:
         raise ChannelSetupError(
-            f"Bot «{title}» kanalida admin, lekin bu huquqlar yoqilmagan: {', '.join(missing)}."
+            f"Bot «{title}» guruhida admin, lekin bu huquqlar yoqilmagan: {', '.join(missing)}."
         )
     return str(chat['id']), title
 
@@ -152,23 +159,23 @@ def _invite_message(member, returning):
     if returning:
         return (
             f"✅ <b>To'lovingiz to'liq qabul qilindi, rahmat!</b>\n\n👤 {name}\n📚 {course}\n\n"
-            "Telegram kanalga qaytish uchun pastdagi tugmani bosing."
+            "Telegram guruhga qaytish uchun pastdagi tugmani bosing."
         )
     return (
-        f"📚 <b>{course}</b> guruhining Telegram kanali\n👤 {name}\n\n"
-        "Kanalga qo'shilish uchun pastdagi tugmani bosing. Havola shaxsiy — faqat shu ishtirokchi uchun."
+        f"📚 <b>{course}</b> kursining Telegram guruhi\n👤 {name}\n\n"
+        "Guruhga qo'shilish uchun pastdagi tugmani bosing. Havola shaxsiy — faqat shu ishtirokchi uchun."
     )
 
 
 def _removal_message(member, debt, was_joined):
     lines = [f"⚠️ <b>{escape(member.group.course.name)}</b>", f"👤 {escape(member.client.full_name)}", ""]
     if was_joined:
-        lines.append("Kurs to'lovi to'liq amalga oshirilmagani uchun guruhning Telegram kanalidan vaqtincha chiqarildingiz.")
+        lines.append("Kurs to'lovi to'liq amalga oshirilmagani uchun kursning Telegram guruhidan vaqtincha chiqarildingiz.")
     else:
-        lines.append("Kurs to'lovi to'liq amalga oshirilmagani uchun kanalga qo'shilish havolasi to'xtatildi.")
+        lines.append("Kurs to'lovi to'liq amalga oshirilmagani uchun Telegram guruhga qo'shilish havolasi to'xtatildi.")
     if debt > 0:
         lines.append(f"Qolgan to'lov: <b>{money(debt)} so'm</b>")
-    lines += ["", "To'lovni to'liq qilsangiz, sizni kanalga qaytaramiz."]
+    lines += ["", "To'lovni to'liq qilsangiz, sizni guruhga qaytaramiz."]
     return "\n".join(lines)
 
 
@@ -189,7 +196,7 @@ def sync_member(member, now=None):
             _update(member, status=TelegramChannelMember.STATUS_INVITED, invite_link=link, link_sent_at=None)
         if member.status == TelegramChannelMember.STATUS_INVITED and not member.link_sent_at:
             returning = member.removed_at is not None
-            button = ("Kanalga qaytish" if returning else "Kanalga qo'shilish", member.invite_link)
+            button = ("Guruhga qaytish" if returning else "Guruhga qo'shilish", member.invite_link)
             delivered, error = _notify(member, _invite_message(member, returning), button)
             _update(member, link_sent_at=now if delivered else None, last_error=error)
         elif member.last_error:
@@ -236,7 +243,7 @@ def process_due_members(limit=10):
             next_at = now + PERMANENT_RETRY_AFTER
             TelegramChannelMember.objects.filter(pk=pk).update(last_error=str(exc)[:255])
         except Exception:
-            logger.exception("Telegram kanal a'zosini sinxronlab bo'lmadi: %s", pk)
+            logger.exception("Telegram guruh a'zosini sinxronlab bo'lmadi: %s", pk)
             next_at = now + RETRY_AFTER
             TelegramChannelMember.objects.filter(pk=pk).update(last_error="Kutilmagan xato, qayta uriniladi.")
         # A payment change during this sync marked the row due again; keep that mark.
@@ -295,7 +302,7 @@ def handle_join_request(join_request):
         account = TelegramUser.objects.filter(telegram_id=user_id, client__isnull=False).first()
         member = members.filter(client_id=account.client_id).first() if account else None
     if member is None:
-        return  # Not one of our clients: the channel admins decide.
+        return  # Not one of our clients: the Telegram group admins decide.
 
     now = timezone.now()
     allowed, _debt, recheck_at = access_decision(member, now)

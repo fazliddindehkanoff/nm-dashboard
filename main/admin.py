@@ -162,14 +162,14 @@ class GroupForm(forms.ModelForm):
         if not cleaned_data.get('telegram_channel_id') and 'telegram_channel_id' not in self.errors:
             self.instance.telegram_channel_title = ''
             if cleaned_data.get('channel_removal_days') is not None:
-                self.add_error('channel_removal_days', _("Avval Telegram kanal ID sini kiriting."))
+                self.add_error('channel_removal_days', _("Avval Telegram guruh ID sini kiriting."))
         return cleaned_data
 
     def clean_telegram_channel_id(self):
         value = (self.cleaned_data.get('telegram_channel_id') or '').strip()
         if not value or value == self.instance.telegram_channel_id:
             return value
-        # The group is saved only if our bot can manage the channel.
+        # The group is saved only if our bot can manage its Telegram group.
         try:
             chat_id, title = check_channel(value)
         except ChannelSetupError as exc:
@@ -214,12 +214,12 @@ class GroupAdmin(ModelAdmin):
     )
     fieldsets = (
         (None, {'fields': ('course', 'teachers', 'start_date', 'number_of_days', 'is_active', 'banner')}),
-        (_("Telegram kanal"), {
+        (_("Telegram guruh"), {
             'fields': ('telegram_channel_id', 'channel_removal_days'),
             'description': _(
-                "Botni kanalga admin qiling va «Invite users via link» hamda «Ban users» huquqlarini yoqing. "
+                "Botni Telegram guruhga admin qiling va «Invite users via link» hamda «Ban users» huquqlarini yoqing. "
                 "To'lov tasdiqlangan har bir mijozga bot shaxsiy havola yuboradi. Muddat o'tgach to'lovni "
-                "to'liq qilmaganlar kanaldan chiqariladi va to'liq to'lagach qaytariladi."
+                "to'liq qilmaganlar Telegram guruhdan chiqariladi va to'liq to'lagach qaytariladi."
             ),
         }),
     )
@@ -303,14 +303,14 @@ class GroupAdmin(ModelAdmin):
     def participants_count(self, obj):
         return obj._participants_count
 
-    @display(description=_("Telegram kanal"))
+    @display(description=_("Telegram guruh"))
     def channel_badge(self, obj):
         if not obj.telegram_channel_id:
             return "—"
         return format_html(
             '<span class="inline-flex items-center gap-1 font-medium px-2 py-0.5 rounded-default text-xs whitespace-nowrap"'
             ' style="background: #e0f2fe; color: #075985;" title="{}">'
-            '<span class="material-symbols-outlined" style="font-size: 14px;" aria-hidden="true">campaign</span>{}</span>',
+            '<span class="material-symbols-outlined" style="font-size: 14px;" aria-hidden="true">forum</span>{}</span>',
             obj.telegram_channel_title or obj.telegram_channel_id,
             _("Ulangan"),
         )
@@ -500,11 +500,11 @@ class GroupAdmin(ModelAdmin):
             members = members.filter(client__operator=request.user.operator)
         member = members.select_related('client').first()
         if member is None:
-            self.message_user(request, _("Kanal a'zosi topilmadi."), messages.ERROR)
+            self.message_user(request, _("Telegram guruh a'zosi topilmadi."), messages.ERROR)
         else:
             resend_link(member)
             self.message_user(
-                request, _("%(name)s uchun kanal holati bir necha soniyada qayta tekshiriladi.") % {'name': member.client.full_name},
+                request, _("%(name)s uchun Telegram guruh holati bir necha soniyada qayta tekshiriladi.") % {'name': member.client.full_name},
                 messages.SUCCESS,
             )
         return redirect(reverse('admin:main_group_detail', args=[group.pk]) + '?tab=channel')

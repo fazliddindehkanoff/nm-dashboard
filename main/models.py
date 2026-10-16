@@ -96,13 +96,13 @@ class Group(models.Model):
         help_text=_("Faol bo'lmagan guruhlar yangi to'lovlarda ko'rsatilmaydi."),
     )
     telegram_channel_id = models.CharField(
-        _("Telegram kanal ID"),
+        _("Telegram guruh ID"),
         max_length=64,
         blank=True,
-        help_text=_("Masalan -1001234567890 yoki @kanal_nomi. Bot kanalda admin bo'lishi shart."),
+        help_text=_("Masalan -1001234567890 yoki @guruh_nomi. Bot guruhda admin bo'lishi shart."),
     )
     telegram_channel_title = models.CharField(
-        _("Telegram kanal nomi"), max_length=255, blank=True, editable=False,
+        _("Telegram guruh nomi"), max_length=255, blank=True, editable=False,
     )
     channel_removal_days = models.PositiveSmallIntegerField(
         _("To'liq to'lov muddati (kun)"),
@@ -110,7 +110,7 @@ class Group(models.Model):
         blank=True,
         validators=(MaxValueValidator(365),),
         help_text=_(
-            "Guruh boshlanganidan necha kun o'tgach to'lovni to'liq qilmaganlar kanaldan chiqariladi. "
+            "Guruh boshlanganidan necha kun o'tgach to'lovni to'liq qilmaganlar Telegram guruhdan chiqariladi. "
             "Bo'sh qoldirilsa, hech kim chiqarilmaydi."
         ),
     )
@@ -899,7 +899,7 @@ class TelegramUser(models.Model):
 
 
 class TelegramChannelMember(models.Model):
-    """One client's access to their group's Telegram channel.
+    """One client's access to their course group's Telegram group.
 
     The worker compares the client's payment with the group rules whenever
     ``next_sync_at`` is due and invites, removes or re-invites the client.
@@ -912,7 +912,7 @@ class TelegramChannelMember(models.Model):
     STATUSES = (
         (STATUS_NEW, _("Havola tayyorlanmoqda")),
         (STATUS_INVITED, _("Havola berilgan")),
-        (STATUS_JOINED, _("Kanalda")),
+        (STATUS_JOINED, _("Guruhda")),
         (STATUS_REMOVED, _("Chiqarilgan")),
     )
 
@@ -922,9 +922,9 @@ class TelegramChannelMember(models.Model):
     )
     status = models.CharField(_("Holat"), max_length=12, choices=STATUSES, default=STATUS_NEW)
     invite_link = models.CharField(_("Shaxsiy havola"), max_length=255, blank=True)
-    telegram_id = models.BigIntegerField(_("Kanalga kirgan Telegram ID"), null=True, blank=True)
+    telegram_id = models.BigIntegerField(_("Guruhga kirgan Telegram ID"), null=True, blank=True)
     link_sent_at = models.DateTimeField(_("Havola yuborilgan vaqt"), null=True, blank=True)
-    joined_at = models.DateTimeField(_("Kanalga kirgan vaqt"), null=True, blank=True)
+    joined_at = models.DateTimeField(_("Guruhga kirgan vaqt"), null=True, blank=True)
     removed_at = models.DateTimeField(_("Chiqarilgan vaqt"), null=True, blank=True)
     next_sync_at = models.DateTimeField(_("Keyingi tekshiruv"), null=True, blank=True, db_index=True)
     last_error = models.CharField(_("Oxirgi xato"), max_length=255, blank=True)
@@ -932,8 +932,8 @@ class TelegramChannelMember(models.Model):
     updated_at = models.DateTimeField(_("Yangilangan vaqt"), auto_now=True)
 
     class Meta:
-        verbose_name = _("Kanal a'zosi")
-        verbose_name_plural = _("Kanal a'zolari")
+        verbose_name = _("Telegram guruh a'zosi")
+        verbose_name_plural = _("Telegram guruh a'zolari")
         constraints = [
             models.UniqueConstraint(fields=('group', 'client'), name='uniq_channel_member_group_client'),
         ]
