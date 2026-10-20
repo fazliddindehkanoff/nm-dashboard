@@ -55,6 +55,18 @@ class EarlyFullPaymentDiscountTests(TestCase):
         purchase = self.buy('booking')
         self.assertEqual((purchase.booking_discount, purchase.payable_amount), (Decimal('200000'), Decimal('1300000')))
 
+    def test_family_discount_replaces_the_early_payment_discount(self):
+        Discount.objects.create(name='Oila', amount=Decimal('100000'), course=self.course, min_participants=2)
+        response = self.post_json(reverse('main:telegram_app_create_purchase'), {
+            'course_id': self.course.id, 'purchase_type': 'family', 'payment_mode': 'full',
+            'members': [{'full_name': 'Oila A\'zosi', 'phone_number': '+998901111111'}],
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+        purchase = MiniAppPurchase.objects.get(pk=response.json()['purchase']['id'])
+        self.assertEqual((purchase.discount_per_person, purchase.booking_discount), (Decimal('100000'), 0))
+        self.assertEqual(purchase.sale_amount, Decimal('2800000'))
+        self.assertEqual(contract_version(purchase), CONTRACT_VERSION)
+
     def test_courses_without_a_booking_discount_are_unchanged(self):
         Discount.objects.all().delete()
         purchase = self.buy('full')

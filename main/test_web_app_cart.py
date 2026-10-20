@@ -128,8 +128,9 @@ class WebAppCartTests(TestCase):
         item = self.add(payment_mode='booking', eligibility_document_id=proof).json()['item_id']
         purchase = self.checkout(item).json()['purchases'][0]
         self.assertTrue(purchase['can_cancel'])
+        # No booking discount applies here, so the booking contract is the one without that clause.
         self.post_json(reverse('main:telegram_app_accept_contract', args=[purchase['id']]),
-                       {'accepted': True, 'version': BOOKING_CONTRACT_VERSION})
+                       {'accepted': True, 'version': f'{BOOKING_CONTRACT_VERSION}.nodiscount'})
         returned = self.post_json(reverse('main:telegram_app_return_to_cart', args=[purchase['id']]), {})
         self.assertEqual(returned.status_code, 200, returned.content)
         cart = returned.json()['cart'][0]

@@ -18,9 +18,9 @@ def contract_version(purchase):
     if not purchase.is_booking:
         return f'{CONTRACT_VERSION}.early' if purchase.booking_discount else CONTRACT_VERSION
     minimum = PaymentSettings.booking_minimum()
-    if minimum == 100000:
-        return BOOKING_CONTRACT_VERSION
-    return f'{BOOKING_CONTRACT_VERSION}.{minimum:.0f}'
+    version = BOOKING_CONTRACT_VERSION if minimum == 100000 else f'{BOOKING_CONTRACT_VERSION}.{minimum:.0f}'
+    # Family bookings get no booking discount, so their contract leaves that clause out.
+    return version if purchase.booking_discount else f'{version}.nodiscount'
 
 
 def render_terms_document():

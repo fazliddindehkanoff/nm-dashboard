@@ -413,7 +413,8 @@
     const eligible = holders.filter(node => $('[name="eligibility_category"]', node)?.value).length;
     const social = Math.min(100000, unit) * eligible;
     const total = unit * count - social;
-    const bookingDiscount = Math.min(total, Math.min(unit, Number(course.booking_discount || 0)) * count);
+    // A family discount replaces the booking discount; the server applies the same rule.
+    const bookingDiscount = perPerson ? 0 : Math.min(total, Math.min(unit, Number(course.booking_discount || 0)) * count);
     const minimum = Number(course.minimum_booking || 0) * count;
     return { count, perPerson, social, total, bookingDiscount, minimum, bookingAvailable: total - bookingDiscount >= minimum };
   }

@@ -6,7 +6,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
 from .models import Discount, MiniAppPurchase, MulticardInvoice
-from .services.legal import BOOKING_CONTRACT_VERSION, TERMS_VERSION
+from .services.legal import BOOKING_CONTRACT_VERSION, TERMS_VERSION, contract_version, render_contract_document
 from .services.multicard import MulticardClient, reconcile_invoice
 from .test_multicard import BOT_TOKEN, CONFIG, MulticardTests
 from .test_telegram_app import TELEGRAM_SETTINGS, TelegramMiniAppTests
@@ -195,8 +195,14 @@ class BookingPurchaseTests(TestCase):
         self.assertEqual(Decimal(paid.json()['purchase']['remaining_amount']), 2400000)
         self.assertEqual(self.post_json(url, {'amount': '200000', 'expected_paid': '0'}).status_code, 400)
 
-    def test_course_booking_rule_takes_precedence_and_preserves_family_discount(self):
+    def test_course_booking_rule_takes_precedence_over_the_global_one(self):
         Discount.objects.create(name='Global', amount=300000, is_booking=True)
+        Discount.objects.create(name='Course booking', course=self.course, amount=200000, is_booking=True)
+        result = self.create_booking()
+        self.assertEqual(result.status_code, 201, result.content)
+        self.assertEqual(Decimal(result.json()['purchase']['booking_discount']), 200000)
+
+    def test_family_discount_replaces_the_booking_discount(self):
         Discount.objects.create(name='Course booking', course=self.course, amount=200000, is_booking=True)
         Discount.objects.create(name='Family', course=self.course, amount=100000, min_participants=2)
         result = self.create_booking(family=True)
@@ -204,9 +210,14 @@ class BookingPurchaseTests(TestCase):
         payload = result.json()['purchase']
         self.assertEqual(Decimal(payload['discount_total']), 200000)
         self.assertEqual(Decimal(payload['total_amount']), 2800000)
-        self.assertEqual(Decimal(payload['booking_discount']), 400000)
-        self.assertEqual(Decimal(payload['payable_amount']), 2400000)
+        self.assertEqual(Decimal(payload['booking_discount']), 0)
+        self.assertEqual(Decimal(payload['payable_amount']), 2800000)
         self.assertEqual(Decimal(payload['minimum_payment']), 200000)
+        purchase = MiniAppPurchase.objects.get(pk=payload['id'])
+        self.assertEqual(contract_version(purchase), f'{BOOKING_CONTRACT_VERSION}.nodiscount')
+        html = render_contract_document(purchase)
+        self.assertNotIn('qo‘llanadigan chegirma', html)
+        self.assertIn('bir qismi bo‘lib, qolgan summa keyingi to‘lovlarda to‘lanadi', html)
 
     def test_no_active_booking_discount_keeps_full_price(self):
         Discount.objects.create(name='Inactive', amount=200000, is_booking=True, is_active=False)

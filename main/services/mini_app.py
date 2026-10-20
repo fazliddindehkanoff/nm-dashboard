@@ -116,7 +116,8 @@ def quote(course, participants, payment_mode, early=True):
     """Server-side price for one course, following the checkout discount rules.
 
     Paying before the group starts earns the booking discount, whether the
-    customer books with a deposit or pays the whole course at once.
+    customer books with a deposit or pays the whole course at once. A family
+    discount replaces it: the two never add up.
     """
     if payment_mode not in dict(MiniAppCartItem.PAYMENT_MODES):
         raise ValueError("To'lov usulini tanlang.")
@@ -127,7 +128,9 @@ def quote(course, participants, payment_mode, early=True):
     eligible = sum(1 for participant in participants if participant['eligibility_document_id'])
     social_discount = min(SOCIAL_DISCOUNT, unit_price) * eligible
     total = unit_price * count - social_discount
-    booking_discount = min(booking_discount_for(unit_price, count, course.id), total) if early else Decimal(0)
+    booking_discount = (
+        min(booking_discount_for(unit_price, count, course.id), total) if early and not rule else Decimal(0)
+    )
     minimum_booking = PaymentSettings.booking_minimum() * count
     return {
         'discount_name': rule.name if rule else '',
