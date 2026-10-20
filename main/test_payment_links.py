@@ -209,6 +209,10 @@ class PaymentLinkTests(TestCase):
         accountant = Operator.objects.create(user=User.objects.create_user('accountant', is_staff=True), full_name='Hisobchi', role='accountant')
         self.client.force_login(accountant.user)
         self.assertEqual(self.client.get(self.link_page()).status_code, 403)
+        # Reception is not limited to its own clients.
+        reception = Operator.objects.create(user=User.objects.create_user('reception', is_staff=True), full_name='Qabulxona', role='reception')
+        self.client.force_login(reception.user)
+        self.assertEqual(self.client.get(self.link_page(other)).status_code, 200)
         self.client.logout()
         self.assertEqual(self.client.get(reverse('main:payment_link', args=[uuid4()])).status_code, 404)
 

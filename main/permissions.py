@@ -31,6 +31,7 @@ def is_accountant(user):
 def can_create_payment_links(user):
     return has_role(
         user, RoleConfiguration.ROLE_ADMIN, RoleConfiguration.ROLE_OWNER, RoleConfiguration.ROLE_OPERATOR,
+        RoleConfiguration.ROLE_RECEPTION,
     )
 
 

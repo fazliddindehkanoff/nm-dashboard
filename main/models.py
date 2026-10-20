@@ -17,11 +17,13 @@ class RoleConfiguration(models.Model):
     ROLE_OPERATOR = 'operator'
     ROLE_OWNER = 'owner'
     ROLE_ACCOUNTANT = 'accountant'
+    ROLE_RECEPTION = 'reception'
     ROLE_CHOICES = (
         (ROLE_ADMIN, _("Admin")),
         (ROLE_OPERATOR, _("Operator / sotuvchi")),
         (ROLE_OWNER, _("Biznes egasi / tadbirkor")),
         (ROLE_ACCOUNTANT, _("Buxgalter / kassir")),
+        (ROLE_RECEPTION, _("Reception / qabulxona")),
     )
 
     code = models.CharField(_("Rol"), max_length=20, choices=ROLE_CHOICES, unique=True)

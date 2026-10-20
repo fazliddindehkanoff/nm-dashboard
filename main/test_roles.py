@@ -15,6 +15,7 @@ from .models import (
     Transaction,
     TransactionClient,
 )
+from .permissions import can_create_payment_links
 
 
 class RoleAccessTestCase(TestCase):
@@ -27,11 +28,29 @@ class RoleAccessTestCase(TestCase):
         )
         return user
 
-    def test_four_system_roles_are_seeded(self):
+    def test_five_system_roles_are_seeded(self):
         self.assertSetEqual(
             set(RoleConfiguration.objects.values_list('code', flat=True)),
-            {'admin', 'operator', 'owner', 'accountant'},
+            {'admin', 'operator', 'owner', 'accountant', 'reception'},
         )
+
+    def test_reception_handles_clients_attendance_and_payment_links_only(self):
+        reception = self.create_profile('reception', RoleConfiguration.ROLE_RECEPTION)
+        for codename in (
+            'view_client', 'add_client', 'change_client', 'view_group', 'view_course',
+            'access_qr_scanner', 'view_attendancerecord', 'add_attendancerecord', 'change_attendancerecord',
+        ):
+            self.assertTrue(reception.has_perm(f'main.{codename}'), codename)
+        for codename in (
+            'delete_client', 'view_transaction', 'add_transaction', 'access_cashflow',
+            'access_dashboard', 'view_expense', 'delete_attendancelesson',
+        ):
+            self.assertFalse(reception.has_perm(f'main.{codename}'), codename)
+        self.assertTrue(can_create_payment_links(reception))
+
+        self.client.force_login(reception)
+        self.assertEqual(self.client.get('/admin/main/client/').status_code, 200)
+        self.assertEqual(self.client.get('/admin/main/transaction/').status_code, 403)
 
     def test_owner_gets_reports_without_operational_write_access(self):
         owner = self.create_profile('owner', RoleConfiguration.ROLE_OWNER)
